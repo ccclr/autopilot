@@ -121,6 +121,32 @@ class CMABActionEncodingConfigTests(TestCase):
 
         self.assertNotIn('--enable-factorized-reward', command)
 
+    def test_cmab_policy_defaults_to_rf_ts(self):
+        parameters = BenchParameters(_parameters())
+
+        self.assertEqual(parameters.cmab_policy, 'rf_ts')
+
+    def test_accepts_round_robin_policy(self):
+        parameters = BenchParameters(_parameters(cmab_policy='round_robin'))
+
+        self.assertEqual(parameters.cmab_policy, 'round_robin')
+
+    def test_rejects_unknown_cmab_policy(self):
+        with self.assertRaisesRegex(ConfigError, 'cmab_policy'):
+            BenchParameters(_parameters(cmab_policy='greedy'))
+
+    def test_controller_command_contains_policy(self):
+        command = CommandMaker.run_controller(
+            node_index=0,
+            repo_name='autopilot',
+            log_dir='/local/logs',
+            parameters_file='/local/.parameters.json',
+            rl_algo='cmab',
+            cmab_policy='round_robin',
+        )
+
+        self.assertIn('--policy round_robin', command)
+
 
 if __name__ == '__main__':
     import unittest

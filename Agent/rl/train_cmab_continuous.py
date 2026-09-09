@@ -25,7 +25,12 @@ def main():
     parser.add_argument("--checkpoint-dir", type=str, default="/tmp/cmab_continuous_checkpoints")
     parser.add_argument("--num-iterations", type=int, default=200)
     parser.add_argument("--checkpoint-freq", type=int, default=10)
-    parser.add_argument("--policy", type=str, default="rf_ts", choices=["rf_ts", "random", "default"])
+    parser.add_argument(
+        "--policy",
+        type=str,
+        default="rf_ts",
+        choices=["rf_ts", "random", "default", "round_robin"],
+    )
     parser.add_argument(
         "--action-encoding",
         type=str,

@@ -68,6 +68,9 @@ class CMABPolicy:
         self._monitor_topk = 5
         # 滑动窗口，记录最近 replay_window 条决策，用于探索时优先选择近期尝试最少的 arm
         self._recent_decisions: deque = deque(maxlen=self._replay_window)
+        self._round_robin_step = 0
+        self._round_robin_order = list(range(len(self._arms)))
+        random.Random(self._random_state).shuffle(self._round_robin_order)
 
     def _stable_int(self, *parts) -> int:
         payload = "|".join(str(p) for p in parts).encode("utf-8")
@@ -174,11 +177,33 @@ class CMABPolicy:
 
         return window_counts, matched_rows
 
-    def select_arm(self, context, shared_seed_hex: str | None = None):
-        # random mode
+    def _select_non_learned_arm(self, shared_seed_hex: str | None = None):
+        """Return an arm for random / round-robin policies; otherwise None."""
         if self.policy_name == "random":
             idx = self._shared_rng_index(len(self._arms), shared_seed_hex, "random_policy")
             return self._arms[idx]
+        if self.policy_name == "round_robin":
+            n = len(self._arms)
+            if n == 0:
+                raise ValueError("round_robin policy requires a non-empty arm catalog")
+            pos = self._round_robin_step % n
+            idx = self._round_robin_order[pos]
+            chosen = self._arms[idx]
+            logger.info(
+                "ROUND_ROBIN step=%d cycle=%d pos=%d arm=%s",
+                self._round_robin_step,
+                self._round_robin_step // n,
+                pos,
+                chosen,
+            )
+            self._round_robin_step += 1
+            return chosen
+        return None
+
+    def select_arm(self, context, shared_seed_hex: str | None = None):
+        non_learned = self._select_non_learned_arm(shared_seed_hex)
+        if non_learned is not None:
+            return non_learned
 
         if (
             not self._is_fitted

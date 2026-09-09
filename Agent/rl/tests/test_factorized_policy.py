@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 RL_ROOT = Path(__file__).resolve().parents[1]
 if str(RL_ROOT) not in sys.path:
     sys.path.insert(0, str(RL_ROOT))
@@ -121,6 +123,21 @@ class FactorizedCMABPolicyTests(unittest.TestCase):
         chosen = policy.select_arm(CTX, shared_seed_hex="counts2")
         self.assertEqual(parse_arm_factors(chosen)["fast_path_timeout"], 200)
 
+    def test_batched_scores_match_per_arm_predict(self) -> None:
+        policy = self._policy()
+        policy.update(
+            [ARMS[0]] * 8 + [ARMS[1]] * 8,
+            [8.0] * 8 + [1.0] * 8,
+            contexts=[CTX] * 16,
+            shared_seed_hex="batch",
+        )
+        batched = policy._predict_rewards_all_arms(CTX)
+        per_arm = np.asarray(
+            [policy._predict_reward(CTX, arm) for arm in ARMS],
+            dtype=np.float64,
+        )
+        np.testing.assert_allclose(batched, per_arm, rtol=1e-10, atol=1e-10)
+
     def test_checkpoint_roundtrip(self) -> None:
         policy = self._policy()
         policy.update(
@@ -173,6 +190,11 @@ class FactorizedCMABPolicyTests(unittest.TestCase):
             policy.save(path)
             with self.assertRaisesRegex(ValueError, "reward model mismatch"):
                 global_policy.load(path)
+
+    def test_round_robin_is_used_before_factorized_inference(self) -> None:
+        policy = self._policy(policy_name="round_robin")
+        first = [policy.select_arm(CTX) for _ in range(len(ARMS))]
+        self.assertEqual(sorted(first), sorted(ARMS))
 
 
 if __name__ == "__main__":

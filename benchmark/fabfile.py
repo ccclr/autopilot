@@ -175,11 +175,33 @@ from fabric import task
 
 
 @task
-def remote(ctx, debug=False, cmab_seed=0, cmab_action_encoding='numeric', duration=10800, enable_factorized_reward=True):
+def remote(
+    ctx,
+    debug=False,
+    cmab_seed=0,
+    cmab_action_encoding='numeric',
+    duration=10800,
+    enable_factorized_reward=True,
+    cmab_policy='rf_ts',
+):
     ''' Run benchmarks on CloudLab. '''
     encoding = str(cmab_action_encoding).lower()
     if encoding not in ('numeric', 'one_hot'):
         raise ValueError('cmab_action_encoding must be "numeric" or "one_hot"')
+    policy = str(cmab_policy).lower()
+    if policy not in ('rf_ts', 'random', 'default', 'round_robin'):
+        raise ValueError(
+            'cmab_policy must be one of rf_ts, random, default, round_robin'
+        )
+    factorized = bool(enable_factorized_reward)
+    resume_from = "/users/clr0302/checkpoints/cmab_factorized/cmab_checkpoint_50.pkl"
+    applied_begin = 42
+    if policy == 'round_robin':
+        # Designed coverage run: cycle the catalog, do not resume a greedy
+        # checkpoint, and give apply a wider slot window so configs land.
+        factorized = False
+        resume_from = None
+        applied_begin = 24
     bench_params = {
         'faults': 0,
         'nodes': [4],
@@ -193,7 +215,7 @@ def remote(ctx, debug=False, cmab_seed=0, cmab_action_encoding='numeric', durati
         'runs': 1,
 
         # CMAB: set a checkpoint path to resume RL, or None to train from scratch.
-        'cmab_resume_from': None,
+        'cmab_resume_from': resume_from,
         # RL algorithm: "cmab", "xgboost", "gp_bo", or "kernel_ucb"
         'rl_algo': 'cmab',
         # CMAB-RF action representation. Use "numeric" for the existing
@@ -202,10 +224,11 @@ def remote(ctx, debug=False, cmab_seed=0, cmab_action_encoding='numeric', durati
         # Pair numeric/one_hot with the same seed; change only between reps.
         'cmab_seed': int(cmab_seed),
         'rl_warmup_iterations': 5,
+        'cmab_policy': policy,
         # False: keep the current global-reward RF (numeric/one_hot).
         # True: switch the trainer to FactorizedCMABPolicy. Do not resume from
         # a global RF checkpoint when this is True; set cmab_resume_from=None.
-        'enable_factorized_reward': bool(enable_factorized_reward),
+        'enable_factorized_reward': factorized,
         'enable_accelerator': False,
         'accelerator_period': 20,
 
@@ -233,11 +256,11 @@ def remote(ctx, debug=False, cmab_seed=0, cmab_action_encoding='numeric', durati
         'use_optimistic_tips': True,
         'use_parallel_proposals': True,
         'k': 4,
-        'epoch_slots': 44,
+        'epoch_slots': 48,
         'window_size': 8,
         # Apply on first commit at/after this position (Rust uses >=).
         # Keep well below epoch_slots so k-parallel slot skips still land.
-        'applied_begin': 42,
+        'applied_begin': applied_begin,
         'use_fast_path': True,
         'fast_path_timeout': 100,
         'use_ride_share': False,
@@ -255,7 +278,7 @@ def remote(ctx, debug=False, cmab_seed=0, cmab_action_encoding='numeric', durati
         'egress_penalty': [[ ]],
 
         'use_fast_sync': True,
-        'use_exponential_timeouts': True,
+        'use_exponential_timeouts': False,
 
         'aggregation_strategy': 'normal',
         'data_pollution_node_ids': [],

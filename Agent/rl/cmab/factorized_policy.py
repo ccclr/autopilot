@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable
 
 import numpy as np
@@ -117,6 +118,7 @@ class FactorizedCMABPolicy(CMABPolicy):
         self._max_depth = int(max_depth)
         self._min_samples_leaf = int(min_samples_leaf)
         self._factor_catalogs = self._build_factor_catalogs(self._arms)
+        self._cache_arm_feature_blocks()
         self._records: list[dict[str, Any]] = []
         self._main: dict[str, RandomForestRegressor] = {
             key: self._new_forest(offset)
@@ -158,6 +160,22 @@ class FactorizedCMABPolicy(CMABPolicy):
             return _one_hot(value, self._factor_catalogs[key])
         return np.asarray([float(value)], dtype=np.float32)
 
+    def _cache_arm_feature_blocks(self) -> None:
+        self._arm_factors = [parse_arm_factors(arm) for arm in self._arms]
+        self._main_factor_mat = {
+            key: np.stack(
+                [self._factor_vec(key, factors[key]) for factors in self._arm_factors]
+            )
+            for key in FACTOR_KEYS
+        }
+        self._pair_factor_mat = {
+            edge: np.concatenate(
+                [self._main_factor_mat[edge[0]], self._main_factor_mat[edge[1]]],
+                axis=1,
+            )
+            for edge in self._pair_edges
+        }
+
     def _main_row(self, context, factors: dict[str, int], key: str) -> np.ndarray:
         return np.concatenate(
             [self._context_vec(context), self._factor_vec(key, factors[key])]
@@ -174,6 +192,25 @@ class FactorizedCMABPolicy(CMABPolicy):
                 self._factor_vec(right, factors[right]),
             ]
         )
+
+    @staticmethod
+    def _tile_context(ctx: np.ndarray, n: int) -> np.ndarray:
+        if ctx.size == 0:
+            return np.zeros((n, 0), dtype=np.float32)
+        return np.broadcast_to(ctx.astype(np.float32, copy=False), (n, ctx.size)).copy()
+
+    @staticmethod
+    def _run_forest_predicts(
+        tasks: list[tuple[RandomForestRegressor, np.ndarray]],
+    ) -> list[np.ndarray]:
+        if not tasks:
+            return []
+        if len(tasks) == 1:
+            model, features = tasks[0]
+            return [np.asarray(model.predict(features), dtype=np.float64)]
+        with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            futures = [pool.submit(model.predict, features) for model, features in tasks]
+            return [np.asarray(fut.result(), dtype=np.float64) for fut in futures]
 
     def _model_ready(self, model: RandomForestRegressor) -> bool:
         estimators = getattr(model, "estimators_", None)
@@ -210,6 +247,59 @@ class FactorizedCMABPolicy(CMABPolicy):
         main_sum, pair_sum, _ = self._predict_components(context, factors)
         return main_sum + pair_sum
 
+    def _predict_rewards_all_arms(self, context) -> np.ndarray:
+        n_arms = len(self._arms)
+        scores = np.zeros(n_arms, dtype=np.float64)
+        ctx = self._tile_context(self._context_vec(context), n_arms)
+        tasks: list[tuple[RandomForestRegressor, np.ndarray]] = []
+        for key, model in self._main.items():
+            if not self._model_ready(model):
+                continue
+            tasks.append((model, np.concatenate([ctx, self._main_factor_mat[key]], axis=1)))
+        for edge, model in self._pair.items():
+            if not self._model_ready(model):
+                continue
+            tasks.append((model, np.concatenate([ctx, self._pair_factor_mat[edge]], axis=1)))
+        for preds in self._run_forest_predicts(tasks):
+            scores += preds
+        return scores
+
+    def _predict_rewards_rows(
+        self, contexts: list, factors_list: list[dict[str, int]]
+    ) -> np.ndarray:
+        n = len(factors_list)
+        if n == 0:
+            return np.zeros(0, dtype=np.float64)
+        scores = np.zeros(n, dtype=np.float64)
+        context_rows = np.stack([self._context_vec(ctx) for ctx in contexts])
+        tasks: list[tuple[RandomForestRegressor, np.ndarray]] = []
+        for key, model in self._main.items():
+            if not self._model_ready(model):
+                continue
+            factor_rows = np.stack(
+                [self._factor_vec(key, factors[key]) for factors in factors_list]
+            )
+            tasks.append((model, np.concatenate([context_rows, factor_rows], axis=1)))
+        for edge, model in self._pair.items():
+            if not self._model_ready(model):
+                continue
+            left, right = edge
+            factor_rows = np.stack(
+                [
+                    np.concatenate(
+                        [
+                            self._factor_vec(left, factors[left]),
+                            self._factor_vec(right, factors[right]),
+                        ]
+                    )
+                    for factors in factors_list
+                ]
+            )
+            tasks.append((model, np.concatenate([context_rows, factor_rows], axis=1)))
+        for preds in self._run_forest_predicts(tasks):
+            scores += preds
+        return scores
+
     def _window_arm_counts_from_replay(self):
         window_counts = {arm: 0 for arm in self._arms}
         recent = self._records[-self._replay_window :]
@@ -222,9 +312,9 @@ class FactorizedCMABPolicy(CMABPolicy):
         return window_counts, matched_rows
 
     def select_arm(self, context, shared_seed_hex: str | None = None):
-        if self.policy_name == "random":
-            idx = self._shared_rng_index(len(self._arms), shared_seed_hex, "random_policy")
-            return self._arms[idx]
+        non_learned = self._select_non_learned_arm(shared_seed_hex)
+        if non_learned is not None:
+            return non_learned
 
         if not self._models_ready():
             idx = self._shared_rng_index(len(self._arms), shared_seed_hex, "cold_start")
@@ -256,9 +346,7 @@ class FactorizedCMABPolicy(CMABPolicy):
             return chosen
 
         logger.info("INFERENCE_START reward_model=factorized")
-        rewards = np.empty(len(self._arms), dtype=np.float64)
-        for i, arm in enumerate(self._arms):
-            rewards[i] = self._predict_reward(context, arm)
+        rewards = self._predict_rewards_all_arms(context)
         logger.info("INFERENCE_DONE")
 
         def _fmt_list(values, idxs):
@@ -376,9 +464,9 @@ class FactorizedCMABPolicy(CMABPolicy):
                 residual = residual - self._pair[edge].predict(features)
 
             self._is_fitted = True
-            fitted_rewards = np.asarray(
-                [self._predict_reward(row["context"], row["arm"]) for row in self._records],
-                dtype=np.float64,
+            fitted_rewards = self._predict_rewards_rows(
+                [row["context"] for row in self._records],
+                [row["factors"] for row in self._records],
             )
             mse = float(np.mean((fitted_rewards - np.asarray(self._y)) ** 2))
             logger.info(
@@ -446,5 +534,6 @@ class FactorizedCMABPolicy(CMABPolicy):
         self._pair = restored or self._pair
         if data.get("factor_catalogs"):
             self._factor_catalogs = data["factor_catalogs"]
+            self._cache_arm_feature_blocks()
         for record in self._records[-self._replay_window :]:
             self._recent_decisions.append(record["arm"])

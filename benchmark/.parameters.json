@@ -1,7 +1,7 @@
 {
     "affected_nodes": [],
     "aggregation_strategy": "normal",
-    "applied_begin": 30,
+    "applied_begin": 24,
     "asynchrony_duration": [
         3000
     ],
@@ -28,7 +28,7 @@
         0,
         0
     ],
-    "epoch_slots": 44,
+    "epoch_slots": 48,
     "fast_path_timeout": 100,
     "gc_depth": 50,
     "header_size": 32,
@@ -39,7 +39,7 @@
     "sync_retry_delay": 5000,
     "sync_retry_nodes": 3,
     "timeout_delay": 5000,
-    "use_exponential_timeouts": true,
+    "use_exponential_timeouts": false,
     "use_fast_path": true,
     "use_fast_sync": true,
     "use_optimistic_tips": true,

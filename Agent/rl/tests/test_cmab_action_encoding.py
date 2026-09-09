@@ -169,6 +169,18 @@ class CMABActionEncodingTests(unittest.TestCase):
             earliest = trainer._get_earliest_metrics_file()
             self.assertEqual(earliest.name, "global_state_epoch_2.json")
 
+    def test_round_robin_covers_catalog_then_repeats(self) -> None:
+        policy = CMABPolicy(
+            arms=ARMS,
+            feature_dim=5,
+            policy_name="round_robin",
+            random_state=0,
+        )
+        first = [policy.select_arm(None) for _ in range(len(ARMS))]
+        self.assertEqual(sorted(first), sorted(ARMS))
+        second = [policy.select_arm(None) for _ in range(len(ARMS))]
+        self.assertEqual(first, second)
+
 
 if __name__ == "__main__":
     unittest.main()

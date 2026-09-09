@@ -323,6 +323,18 @@ class BenchParameters:
             else:
                 self.enable_factorized_reward = bool(enable_factorized)
 
+            cmab_policy = json.get('cmab_policy', 'rf_ts')
+            if cmab_policy in (None, ''):
+                cmab_policy = 'rf_ts'
+            if not isinstance(cmab_policy, str):
+                raise ConfigError('cmab_policy must be a string')
+            cmab_policy = cmab_policy.lower()
+            if cmab_policy not in ('rf_ts', 'random', 'default', 'round_robin'):
+                raise ConfigError(
+                    'cmab_policy must be one of rf_ts, random, default, round_robin'
+                )
+            self.cmab_policy = cmab_policy
+
             # Probe every N consensus epochs on node 0; all nodes apply at detect_epoch+5.
             acc_period = json.get('accelerator_period', 100)
             if acc_period in (None, ''):

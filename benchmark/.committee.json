@@ -1,6 +1,6 @@
 {
     "authorities": {
-        "7sC5Z6OgDuesTURl+ANUuA8PU6PZqZQJT1WhIdTozvM=": {
+        "SijLLkYvcIIItWAL/dTOdxrfH3rMS6GPWH+QkDeLNg4=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.2:5006"
             },
@@ -17,24 +17,7 @@
                 }
             }
         },
-        "JNse73Euk3IOzB+UwQi7RHUU7zMY7N7k8/47XFupra0=": {
-            "consensus": {
-                "consensus_to_consensus": "10.10.1.3:5012"
-            },
-            "primary": {
-                "primary_to_primary": "10.10.1.3:5013",
-                "worker_to_primary": "10.10.1.3:5014"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.10.1.3:5015",
-                    "transactions": "10.10.1.3:5016",
-                    "worker_to_worker": "10.10.1.3:5017"
-                }
-            }
-        },
-        "N+RMmDweCin4EikqXynLZCjSqZ50meo8a9lK8PC9rzY=": {
+        "X6+SnZAsLIOCEE9I7VpX52FlCIDYohk/fAoc4HPnUyI=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.1:5000"
             },
@@ -51,7 +34,24 @@
                 }
             }
         },
-        "hsd+c+pdvT09qp8Cx/I8dKPXktRmb5OW8DSCY9gSyI0=": {
+        "mF23HaRSwCh9Xbh6vRmyjZm604TC67FM5SxD9nN8xZ4=": {
+            "consensus": {
+                "consensus_to_consensus": "10.10.1.3:5012"
+            },
+            "primary": {
+                "primary_to_primary": "10.10.1.3:5013",
+                "worker_to_primary": "10.10.1.3:5014"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.10.1.3:5015",
+                    "transactions": "10.10.1.3:5016",
+                    "worker_to_worker": "10.10.1.3:5017"
+                }
+            }
+        },
+        "yP7bdWh7dYBK6fZfYr5RGftoeDO34xLoIochkcqNd/o=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.4:5018"
             },
