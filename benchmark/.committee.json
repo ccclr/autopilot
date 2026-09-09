@@ -1,23 +1,6 @@
 {
     "authorities": {
-        "SijLLkYvcIIItWAL/dTOdxrfH3rMS6GPWH+QkDeLNg4=": {
-            "consensus": {
-                "consensus_to_consensus": "10.10.1.2:5006"
-            },
-            "primary": {
-                "primary_to_primary": "10.10.1.2:5007",
-                "worker_to_primary": "10.10.1.2:5008"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.10.1.2:5009",
-                    "transactions": "10.10.1.2:5010",
-                    "worker_to_worker": "10.10.1.2:5011"
-                }
-            }
-        },
-        "X6+SnZAsLIOCEE9I7VpX52FlCIDYohk/fAoc4HPnUyI=": {
+        "4015c5XnFQJx0+nAHNJE8VQDuE798ZwuptXSG35kzY4=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.1:5000"
             },
@@ -34,24 +17,7 @@
                 }
             }
         },
-        "mF23HaRSwCh9Xbh6vRmyjZm604TC67FM5SxD9nN8xZ4=": {
-            "consensus": {
-                "consensus_to_consensus": "10.10.1.3:5012"
-            },
-            "primary": {
-                "primary_to_primary": "10.10.1.3:5013",
-                "worker_to_primary": "10.10.1.3:5014"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.10.1.3:5015",
-                    "transactions": "10.10.1.3:5016",
-                    "worker_to_worker": "10.10.1.3:5017"
-                }
-            }
-        },
-        "yP7bdWh7dYBK6fZfYr5RGftoeDO34xLoIochkcqNd/o=": {
+        "93+wDnlShs4CoOOBji6PnJmt1DWLqivqEDzAhQKlgCw=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.4:5018"
             },
@@ -65,6 +31,40 @@
                     "primary_to_worker": "10.10.1.4:5021",
                     "transactions": "10.10.1.4:5022",
                     "worker_to_worker": "10.10.1.4:5023"
+                }
+            }
+        },
+        "LJKwh/dyN6NrnnbQgjVlDxpunWjasJ5utNYCpEbvzMY=": {
+            "consensus": {
+                "consensus_to_consensus": "10.10.1.2:5006"
+            },
+            "primary": {
+                "primary_to_primary": "10.10.1.2:5007",
+                "worker_to_primary": "10.10.1.2:5008"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.10.1.2:5009",
+                    "transactions": "10.10.1.2:5010",
+                    "worker_to_worker": "10.10.1.2:5011"
+                }
+            }
+        },
+        "WNYRSh+R92M/h9W9U0gzgNyzC9ZUVOoKAs6TKlqVUuQ=": {
+            "consensus": {
+                "consensus_to_consensus": "10.10.1.3:5012"
+            },
+            "primary": {
+                "primary_to_primary": "10.10.1.3:5013",
+                "worker_to_primary": "10.10.1.3:5014"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.10.1.3:5015",
+                    "transactions": "10.10.1.3:5016",
+                    "worker_to_worker": "10.10.1.3:5017"
                 }
             }
         }

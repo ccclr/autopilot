@@ -66,6 +66,10 @@ class CMABTrainer:
             )
         else:
             self.accelerator = None
+        self._round_robin_state_path = self.checkpoint_dir / "round_robin_state.json"
+        if hasattr(self.policy, "restore_round_robin"):
+            self.policy._round_robin_state_path = str(self._round_robin_state_path)
+            self.policy.restore_round_robin(self._round_robin_state_path)
 
     def run(self, num_iterations: Optional[int], checkpoint_freq: int):
         logger.info("Initializing CMAB training loop...")
@@ -86,7 +90,15 @@ class CMABTrainer:
         else:
             logger.info("Accelerator disabled")
         self._connect_param_socket()
-        self.last_metrics_file = self._get_earliest_metrics_file()
+        if getattr(self.policy, "skips_learning", lambda: False)():
+            self.last_metrics_file = self._get_latest_metrics_file()
+            if self.last_metrics_file is not None:
+                logger.info(
+                    "round_robin resume: starting from latest metrics %s (skip RF updates)",
+                    self.last_metrics_file.name,
+                )
+        else:
+            self.last_metrics_file = self._get_earliest_metrics_file()
         if self.last_metrics_file is None:
             logger.info("No existing metrics file, waiting for first available global_state...")
             self.last_metrics_file = self._wait_for_first_available_metrics_file(
@@ -164,8 +176,16 @@ class CMABTrainer:
                     use_arm = arm
 
                 apply_ok = self._param_apply_ok_from_global_state(next_metrics)
+                skips_learning = getattr(self.policy, "skips_learning", lambda: False)()
                 in_warmup = iteration < self.warmup_iterations
-                if not apply_ok:
+                if skips_learning:
+                    logger.info(
+                        "Skip policy update: policy=%s is selection-only reward=%.6f arm=%s",
+                        self.policy.policy_name,
+                        reward,
+                        use_arm,
+                    )
+                elif not apply_ok:
                     logger.warning(
                         "Skip policy update: param_apply_ok=false metrics=%s reward=%.6f intended_arm=%s",
                         next_metrics.name,
@@ -213,7 +233,7 @@ class CMABTrainer:
                     top_ratio,
                 )
 
-                if iteration % checkpoint_freq == 0:
+                if (not skips_learning) and iteration % checkpoint_freq == 0:
                     checkpoint_path = (
                         self.checkpoint_dir / f"{self.checkpoint_prefix}_{iteration}.pkl"
                     )

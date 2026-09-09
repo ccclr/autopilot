@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -105,12 +106,15 @@ def start_fab() -> subprocess.Popen:
     ]
     EXP_DIR.mkdir(parents=True, exist_ok=True)
     handle = open(EXP_DIR / "fab.log", "w", encoding="utf-8")
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         cmd,
         cwd=str(BENCH),
         stdout=handle,
         stderr=subprocess.STDOUT,
         preexec_fn=os.setsid,
+        env=env,
     )
     proc._log_handle = handle  # type: ignore[attr-defined]
     return proc
@@ -170,9 +174,24 @@ def run_attempt(attempt: int) -> dict:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Archive and wipe metrics-0 before starting (default: resume in place)",
+    )
+    args = parser.parse_args()
+
     EXP_DIR.mkdir(parents=True, exist_ok=True)
     kill_cluster()
-    archive_old_metrics()
+    if args.fresh:
+        archive_old_metrics()
+    else:
+        stats = slot_stats()
+        log(
+            f"resume in place: windows={stats['n']} unique_arms={stats['unique']} "
+            f"k={stats['k_vals']} epochs={stats['epoch_min']}..{stats['epoch_max']}"
+        )
     last = {}
     for attempt in range(1, MAX_ATTEMPTS + 1):
         last = run_attempt(attempt)
@@ -180,13 +199,7 @@ def main() -> int:
             break
         log(f"attempt {attempt} ended status={last.get('status')}")
         if attempt < MAX_ATTEMPTS:
-            archive = EXP_DIR / f"metrics-attempt-{attempt}"
-            if METRICS_DIR.is_dir():
-                if archive.exists():
-                    shutil.rmtree(archive, ignore_errors=True)
-                shutil.copytree(METRICS_DIR, archive)
-            shutil.rmtree(METRICS_DIR, ignore_errors=True)
-            METRICS_DIR.mkdir(parents=True, exist_ok=True)
+            log("keeping metrics-0 and round_robin_state.json for resume")
     (EXP_DIR / "meta.json").write_text(json.dumps(last, indent=2) + "\n")
     log(f"done status={last.get('status')} windows={last.get('n')} unique={last.get('unique')}")
     return 0 if last.get("status") == "ok" else 1

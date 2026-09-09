@@ -181,6 +181,30 @@ class CMABActionEncodingTests(unittest.TestCase):
         second = [policy.select_arm(None) for _ in range(len(ARMS))]
         self.assertEqual(first, second)
 
+    def test_round_robin_skips_learning_and_resumes_step(self) -> None:
+        policy = CMABPolicy(
+            arms=ARMS,
+            feature_dim=5,
+            policy_name="round_robin",
+            random_state=0,
+        )
+        self.assertTrue(policy.skips_learning())
+        first = policy.select_arm(None)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "round_robin_state.json"
+            policy.persist_round_robin(path)
+            resumed = CMABPolicy(
+                arms=ARMS,
+                feature_dim=5,
+                policy_name="round_robin",
+                random_state=0,
+            )
+            self.assertTrue(resumed.restore_round_robin(path))
+            self.assertEqual(resumed.select_arm(None), policy.select_arm(None))
+        before = len(policy._y)
+        policy.update([first], [1.23], contexts=[[0.0] * 5])
+        self.assertEqual(len(policy._y), before)
+
 
 if __name__ == "__main__":
     unittest.main()

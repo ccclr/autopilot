@@ -1,8 +1,10 @@
+import json
 import numpy as np
 import random
 import logging
 import hashlib
 from collections import deque
+from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,62 @@ class CMABPolicy:
         self._round_robin_step = 0
         self._round_robin_order = list(range(len(self._arms)))
         random.Random(self._random_state).shuffle(self._round_robin_order)
+        self._round_robin_state_path = None
+
+    def skips_learning(self) -> bool:
+        return self.policy_name == "round_robin"
+
+    def persist_round_robin(self, path=None) -> None:
+        if self.policy_name != "round_robin":
+            return
+        raw = path or self._round_robin_state_path
+        if not raw:
+            return
+        target = Path(raw)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "policy_name": self.policy_name,
+            "random_state": self._random_state,
+            "arms": list(self._arms),
+            "order": list(self._round_robin_order),
+            "step": int(self._round_robin_step),
+        }
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload))
+        tmp.replace(target)
+
+    def restore_round_robin(self, path=None) -> bool:
+        if self.policy_name != "round_robin":
+            return False
+        raw = path or self._round_robin_state_path
+        if not raw:
+            return False
+        target = Path(raw)
+        if not target.exists():
+            return False
+        data = json.loads(target.read_text())
+        saved_arms = tuple(data.get("arms") or [])
+        if saved_arms != tuple(self._arms):
+            logger.warning(
+                "round_robin state catalog mismatch (%d vs %d arms); not restoring",
+                len(saved_arms),
+                len(self._arms),
+            )
+            return False
+        order = data.get("order")
+        if not isinstance(order, list) or len(order) != len(self._arms):
+            logger.warning("round_robin state order invalid; not restoring")
+            return False
+        self._round_robin_order = [int(idx) for idx in order]
+        self._round_robin_step = int(data.get("step") or 0)
+        self._round_robin_state_path = str(target)
+        logger.info(
+            "Restored round_robin step=%d cycle=%d from %s",
+            self._round_robin_step,
+            self._round_robin_step // max(1, len(self._arms)),
+            target,
+        )
+        return True
 
     def _stable_int(self, *parts) -> int:
         payload = "|".join(str(p) for p in parts).encode("utf-8")
@@ -197,6 +255,7 @@ class CMABPolicy:
                 chosen,
             )
             self._round_robin_step += 1
+            self.persist_round_robin()
             return chosen
         return None
 
@@ -298,6 +357,9 @@ class CMABPolicy:
         return chosen
 
     def update(self, decisions, rewards, contexts=None, shared_seed_hex: str | None = None):
+        if self.skips_learning():
+            logger.info("Skip RF update: policy=%s is selection-only", self.policy_name)
+            return
         if contexts is None:
             contexts = [None] * len(decisions)
             
@@ -368,6 +430,8 @@ class CMABPolicy:
             'update_count': self._update_count,
             'action_encoding': self.action_encoding,
             'arms': list(self._arms),
+            'round_robin_step': self._round_robin_step,
+            'round_robin_order': list(self._round_robin_order),
         }, path)
 
     def load(self, path):
@@ -398,3 +462,7 @@ class CMABPolicy:
         self._y = data['y']
         self._is_fitted = data['is_fitted']
         self._update_count = data['update_count']
+        if data.get('round_robin_order') is not None:
+            self._round_robin_order = [int(idx) for idx in data['round_robin_order']]
+        if data.get('round_robin_step') is not None:
+            self._round_robin_step = int(data['round_robin_step'])
