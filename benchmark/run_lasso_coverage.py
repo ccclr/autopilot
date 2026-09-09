@@ -44,20 +44,30 @@ def kill_cluster() -> None:
     time.sleep(3)
 
 
-RR_STATE = HOME / "checkpoints" / "round_robin_state.json"
+RR_STATE_GLOB = "round_robin_state*.json"
 
 
 def reset_round_robin_to_pos0() -> None:
-    """Force the next select_arm to use shuffled catalog position 0."""
-    if not RR_STATE.is_file():
-        log("no round_robin_state.json; trainer will start at step=0")
+    """Drop every node's round-robin cursor so the next run starts at pos=0.
+
+    Overwriting step=0 in a shared file is not enough: remotes can still see
+    a stale NFS copy, and later-starting trainers restore node0's advanced step.
+    """
+    ckpt = HOME / "checkpoints"
+    if not ckpt.is_dir():
+        log("no checkpoints dir; trainers will start at step=0")
         return
-    data = json.loads(RR_STATE.read_text())
-    data["step"] = 0
-    tmp = RR_STATE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data))
-    tmp.replace(RR_STATE)
-    log("reset round_robin_state.json step=0 (pos=0)")
+    removed = []
+    for path in sorted(ckpt.glob(RR_STATE_GLOB)):
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except OSError as exc:
+            log(f"failed to remove {path}: {exc}")
+    if removed:
+        log(f"removed round_robin state files: {removed}")
+    else:
+        log("no round_robin_state*.json; trainers will start at step=0")
 
 
 def archive_old_metrics() -> None:

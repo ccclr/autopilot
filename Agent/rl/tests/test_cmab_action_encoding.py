@@ -205,6 +205,49 @@ class CMABActionEncodingTests(unittest.TestCase):
         policy.update([first], [1.23], contexts=[[0.0] * 5])
         self.assertEqual(len(policy._y), before)
 
+    def test_round_robin_state_file_is_per_node(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ckpt = Path(directory)
+            metrics = ckpt / "metrics"
+            metrics.mkdir()
+            params = ckpt / "params.json"
+            params.write_text("{}")
+            policy0 = CMABPolicy(
+                arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
+            )
+            policy1 = CMABPolicy(
+                arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
+            )
+            trainer0 = CMABTrainer(
+                metrics_dir=str(metrics),
+                parameters_file=str(params),
+                checkpoint_dir=str(ckpt),
+                policy=policy0,
+                context_builder=None,
+                arm_catalog=None,
+                node_index=0,
+            )
+            policy0.select_arm(None)
+            trainer1 = CMABTrainer(
+                metrics_dir=str(metrics),
+                parameters_file=str(params),
+                checkpoint_dir=str(ckpt),
+                policy=policy1,
+                context_builder=None,
+                arm_catalog=None,
+                node_index=1,
+            )
+            self.assertEqual(
+                Path(trainer0._round_robin_state_path).name,
+                "round_robin_state_0.json",
+            )
+            self.assertEqual(
+                Path(trainer1._round_robin_state_path).name,
+                "round_robin_state_1.json",
+            )
+            self.assertEqual(policy0._round_robin_step, 1)
+            self.assertEqual(policy1._round_robin_step, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
