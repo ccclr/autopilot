@@ -381,7 +381,7 @@ class GPBOPolicy:
         logger.info("================================================================================")
         return chosen["arm"]
 
-    def select_arm(self, context, shared_seed_hex: str | None = None):
+    def select_arm(self, context, shared_seed_hex: str | None = None, epoch: int | None = None):
         if (
             not self._is_fitted
             or self._gp is None

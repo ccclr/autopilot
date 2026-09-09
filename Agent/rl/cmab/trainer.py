@@ -66,18 +66,6 @@ class CMABTrainer:
             )
         else:
             self.accelerator = None
-        self._round_robin_state_path = self._round_robin_state_file()
-        if hasattr(self.policy, "restore_round_robin"):
-            self.policy._round_robin_state_path = str(self._round_robin_state_path)
-            self.policy.restore_round_robin(self._round_robin_state_path)
-
-    def _round_robin_state_file(self) -> Path:
-        # Each node must keep its own cursor. A shared JSON on NFS lets node0
-        # advance the catalog, then later-starting remotes restore that step
-        # (or a stale cached copy) and select a different arm.
-        if self.node_index is None:
-            return self.checkpoint_dir / "round_robin_state.json"
-        return self.checkpoint_dir / f"round_robin_state_{int(self.node_index)}.json"
 
     def run(self, num_iterations: Optional[int], checkpoint_freq: int):
         logger.info("Initializing CMAB training loop...")
@@ -132,7 +120,11 @@ class CMABTrainer:
                     self.accelerator.on_epoch(current_epoch)
                     self._apply_accelerator()
                 shared_seed_hex = self._compute_shared_seed_hex(self.last_metrics_file)
-                arm = self.policy.select_arm(context, shared_seed_hex=shared_seed_hex)
+                arm = self.policy.select_arm(
+                    context,
+                    shared_seed_hex=shared_seed_hex,
+                    epoch=current_epoch,
+                )
                 params = self.arm_catalog.decode_arm(arm)
                 self.arm_counts[arm] = self.arm_counts.get(arm, 0) + 1
                 if current_epoch is not None:

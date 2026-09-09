@@ -292,7 +292,7 @@ class KernelUCBPolicy:
         )
         return chosen
 
-    def select_arm(self, context, shared_seed_hex: str | None = None):
+    def select_arm(self, context, shared_seed_hex: str | None = None, epoch: int | None = None):
         # Post-resume / explicit warmup: explore even if model is already fitted.
         if self._forced_cold_start_remaining > 0:
             self._forced_cold_start_remaining -= 1

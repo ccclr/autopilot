@@ -235,7 +235,9 @@ class CMABPolicy:
 
         return window_counts, matched_rows
 
-    def _select_non_learned_arm(self, shared_seed_hex: str | None = None):
+    def _select_non_learned_arm(
+        self, shared_seed_hex: str | None = None, epoch: int | None = None
+    ):
         """Return an arm for random / round-robin policies; otherwise None."""
         if self.policy_name == "random":
             idx = self._shared_rng_index(len(self._arms), shared_seed_hex, "random_policy")
@@ -244,23 +246,34 @@ class CMABPolicy:
             n = len(self._arms)
             if n == 0:
                 raise ValueError("round_robin policy requires a non-empty arm catalog")
-            pos = self._round_robin_step % n
+            # Same contract as rf_ts/random: a pure function of shared inputs.
+            # Late-starting nodes must pick the arm for this epoch, not local
+            # select-count 0. A persisted step cursor desyncs remotes forever.
+            if epoch is not None:
+                pos = int(epoch) % n
+                self._round_robin_step = pos
+            else:
+                pos = self._round_robin_step % n
+                self._round_robin_step += 1
             idx = self._round_robin_order[pos]
             chosen = self._arms[idx]
             logger.info(
-                "ROUND_ROBIN step=%d cycle=%d pos=%d arm=%s",
-                self._round_robin_step,
-                self._round_robin_step // n,
+                "ROUND_ROBIN epoch=%s cycle=%d pos=%d arm=%s",
+                epoch,
+                int(epoch) // n if epoch is not None else pos // n,
                 pos,
                 chosen,
             )
-            self._round_robin_step += 1
-            self.persist_round_robin()
             return chosen
         return None
 
-    def select_arm(self, context, shared_seed_hex: str | None = None):
-        non_learned = self._select_non_learned_arm(shared_seed_hex)
+    def select_arm(
+        self,
+        context,
+        shared_seed_hex: str | None = None,
+        epoch: int | None = None,
+    ):
+        non_learned = self._select_non_learned_arm(shared_seed_hex, epoch=epoch)
         if non_learned is not None:
             return non_learned
 

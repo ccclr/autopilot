@@ -176,77 +176,44 @@ class CMABActionEncodingTests(unittest.TestCase):
             policy_name="round_robin",
             random_state=0,
         )
-        first = [policy.select_arm(None) for _ in range(len(ARMS))]
+        n = len(ARMS)
+        first = [policy.select_arm(None, epoch=i) for i in range(n)]
         self.assertEqual(sorted(first), sorted(ARMS))
-        second = [policy.select_arm(None) for _ in range(len(ARMS))]
+        second = [policy.select_arm(None, epoch=i + n) for i in range(n)]
         self.assertEqual(first, second)
 
-    def test_round_robin_skips_learning_and_resumes_step(self) -> None:
-        policy = CMABPolicy(
+    def test_round_robin_skips_learning_and_matches_across_nodes(self) -> None:
+        kwargs = dict(
             arms=ARMS,
             feature_dim=5,
             policy_name="round_robin",
             random_state=0,
         )
+        policy = CMABPolicy(**kwargs)
+        other = CMABPolicy(**kwargs)
         self.assertTrue(policy.skips_learning())
-        first = policy.select_arm(None)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "round_robin_state.json"
-            policy.persist_round_robin(path)
-            resumed = CMABPolicy(
-                arms=ARMS,
-                feature_dim=5,
-                policy_name="round_robin",
-                random_state=0,
+        for epoch in range(len(ARMS) + 3):
+            self.assertEqual(
+                policy.select_arm(None, epoch=epoch),
+                other.select_arm(None, epoch=epoch),
             )
-            self.assertTrue(resumed.restore_round_robin(path))
-            self.assertEqual(resumed.select_arm(None), policy.select_arm(None))
         before = len(policy._y)
-        policy.update([first], [1.23], contexts=[[0.0] * 5])
+        policy.update([policy.select_arm(None, epoch=0)], [1.23], contexts=[[0.0] * 5])
         self.assertEqual(len(policy._y), before)
 
-    def test_round_robin_state_file_is_per_node(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            ckpt = Path(directory)
-            metrics = ckpt / "metrics"
-            metrics.mkdir()
-            params = ckpt / "params.json"
-            params.write_text("{}")
-            policy0 = CMABPolicy(
-                arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
-            )
-            policy1 = CMABPolicy(
-                arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
-            )
-            trainer0 = CMABTrainer(
-                metrics_dir=str(metrics),
-                parameters_file=str(params),
-                checkpoint_dir=str(ckpt),
-                policy=policy0,
-                context_builder=None,
-                arm_catalog=None,
-                node_index=0,
-            )
-            policy0.select_arm(None)
-            trainer1 = CMABTrainer(
-                metrics_dir=str(metrics),
-                parameters_file=str(params),
-                checkpoint_dir=str(ckpt),
-                policy=policy1,
-                context_builder=None,
-                arm_catalog=None,
-                node_index=1,
-            )
-            self.assertEqual(
-                Path(trainer0._round_robin_state_path).name,
-                "round_robin_state_0.json",
-            )
-            self.assertEqual(
-                Path(trainer1._round_robin_state_path).name,
-                "round_robin_state_1.json",
-            )
-            self.assertEqual(policy0._round_robin_step, 1)
-            self.assertEqual(policy1._round_robin_step, 0)
+    def test_round_robin_late_node_uses_epoch_not_local_step(self) -> None:
+        early = CMABPolicy(
+            arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
+        )
+        late = CMABPolicy(
+            arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
+        )
+        for epoch in range(5):
+            early.select_arm(None, epoch=epoch)
+        self.assertEqual(
+            late.select_arm(None, epoch=5),
+            early.select_arm(None, epoch=5),
+        )
 
 
 if __name__ == "__main__":

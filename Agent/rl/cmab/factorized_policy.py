@@ -311,8 +311,13 @@ class FactorizedCMABPolicy(CMABPolicy):
                 matched_rows += 1
         return window_counts, matched_rows
 
-    def select_arm(self, context, shared_seed_hex: str | None = None):
-        non_learned = self._select_non_learned_arm(shared_seed_hex)
+    def select_arm(
+        self,
+        context,
+        shared_seed_hex: str | None = None,
+        epoch: int | None = None,
+    ):
+        non_learned = self._select_non_learned_arm(shared_seed_hex, epoch=epoch)
         if non_learned is not None:
             return non_learned
 

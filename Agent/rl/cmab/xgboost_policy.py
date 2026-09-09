@@ -96,7 +96,7 @@ class XGBoostPolicy(CMABPolicy):
         rng = np.random.default_rng(seed_u64)
         return rng.choice(replay_length, replay_length, replace=True)
 
-    def select_arm(self, context, shared_seed_hex: str | None = None):
+    def select_arm(self, context, shared_seed_hex: str | None = None, epoch: int | None = None):
         if self.policy_name == "random":
             idx = self._shared_rng_index(len(self._arms), shared_seed_hex, "random_policy")
             return self._arms[idx]

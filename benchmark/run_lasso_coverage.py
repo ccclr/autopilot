@@ -137,9 +137,10 @@ def start_fab() -> subprocess.Popen:
     proc = subprocess.Popen(
         cmd,
         cwd=str(BENCH),
+        stdin=subprocess.DEVNULL,
         stdout=handle,
         stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid,
+        start_new_session=True,
         env=env,
     )
     proc._log_handle = handle  # type: ignore[attr-defined]
