@@ -1,6 +1,6 @@
 {
     "authorities": {
-        "4015c5XnFQJx0+nAHNJE8VQDuE798ZwuptXSG35kzY4=": {
+        "4iv9swprXfUul5o5/gfdkBSGBN8uX5g3P6GX0R/hOB0=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.1:5000"
             },
@@ -17,7 +17,7 @@
                 }
             }
         },
-        "93+wDnlShs4CoOOBji6PnJmt1DWLqivqEDzAhQKlgCw=": {
+        "ZBPRJKgOMpWxf7Xo8zpG5WCb5DUSl8MjgF6G5pzLHY0=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.4:5018"
             },
@@ -34,7 +34,7 @@
                 }
             }
         },
-        "LJKwh/dyN6NrnnbQgjVlDxpunWjasJ5utNYCpEbvzMY=": {
+        "cpnl6AkhDIX8KeP8FWDI2K7cN2WH9YrS9N23Vj20jJA=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.2:5006"
             },
@@ -51,7 +51,7 @@
                 }
             }
         },
-        "WNYRSh+R92M/h9W9U0gzgNyzC9ZUVOoKAs6TKlqVUuQ=": {
+        "x9/6wKxRHJZ8+Ed6okt6mSnWvutcJhqiqsp4LqanPmI=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.3:5012"
             },

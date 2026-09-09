@@ -44,6 +44,22 @@ def kill_cluster() -> None:
     time.sleep(3)
 
 
+RR_STATE = HOME / "checkpoints" / "round_robin_state.json"
+
+
+def reset_round_robin_to_pos0() -> None:
+    """Force the next select_arm to use shuffled catalog position 0."""
+    if not RR_STATE.is_file():
+        log("no round_robin_state.json; trainer will start at step=0")
+        return
+    data = json.loads(RR_STATE.read_text())
+    data["step"] = 0
+    tmp = RR_STATE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(RR_STATE)
+    log("reset round_robin_state.json step=0 (pos=0)")
+
+
 def archive_old_metrics() -> None:
     if not METRICS_DIR.is_dir():
         METRICS_DIR.mkdir(parents=True, exist_ok=True)
@@ -186,6 +202,7 @@ def main() -> int:
     kill_cluster()
     if args.fresh:
         archive_old_metrics()
+        reset_round_robin_to_pos0()
     else:
         stats = slot_stats()
         log(
