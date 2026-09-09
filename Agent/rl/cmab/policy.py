@@ -9,6 +9,11 @@ from sklearn.ensemble import RandomForestRegressor
 
 logger = logging.getLogger(__name__)
 
+# Shared resume point for every node. Consensus epoch 0 selects shuffled
+# catalog[ROUND_ROBIN_START_POS]. Set back to 0 for a fresh sweep.
+ROUND_ROBIN_START_POS = 39
+
+
 class CMABPolicy:
     ACTION_ENCODINGS = ("numeric", "one_hot")
 
@@ -71,12 +76,19 @@ class CMABPolicy:
         # 滑动窗口，记录最近 replay_window 条决策，用于探索时优先选择近期尝试最少的 arm
         self._recent_decisions: deque = deque(maxlen=self._replay_window)
         self._round_robin_step = 0
+        self._round_robin_pos_offset = (
+            ROUND_ROBIN_START_POS if self.policy_name == "round_robin" else 0
+        )
         self._round_robin_order = list(range(len(self._arms)))
         random.Random(self._random_state).shuffle(self._round_robin_order)
         self._round_robin_state_path = None
 
     def skips_learning(self) -> bool:
         return self.policy_name == "round_robin"
+
+    def set_round_robin_start_pos(self, start_pos: int) -> None:
+        """Resume so epoch 0 selects shuffled_catalog[start_pos] on every node."""
+        self._round_robin_pos_offset = int(start_pos)
 
     def persist_round_robin(self, path=None) -> None:
         if self.policy_name != "round_robin":
@@ -249,18 +261,20 @@ class CMABPolicy:
             # Same contract as rf_ts/random: a pure function of shared inputs.
             # Late-starting nodes must pick the arm for this epoch, not local
             # select-count 0. A persisted step cursor desyncs remotes forever.
+            offset = int(getattr(self, "_round_robin_pos_offset", 0) or 0)
             if epoch is not None:
-                pos = int(epoch) % n
+                pos = (int(epoch) + offset) % n
                 self._round_robin_step = pos
             else:
-                pos = self._round_robin_step % n
+                pos = (self._round_robin_step + offset) % n
                 self._round_robin_step += 1
             idx = self._round_robin_order[pos]
             chosen = self._arms[idx]
             logger.info(
-                "ROUND_ROBIN epoch=%s cycle=%d pos=%d arm=%s",
+                "ROUND_ROBIN epoch=%s offset=%d cycle=%d pos=%d arm=%s",
                 epoch,
-                int(epoch) // n if epoch is not None else pos // n,
+                offset,
+                (int(epoch) + offset) // n if epoch is not None else pos // n,
                 pos,
                 chosen,
             )

@@ -85,6 +85,12 @@ class CMABTrainer:
             )
         else:
             logger.info("Accelerator disabled")
+        if getattr(self.policy, "policy_name", None) == "round_robin":
+            start_pos = int(getattr(self.policy, "_round_robin_pos_offset", 0) or 0)
+            logger.info(
+                "round_robin start_pos=%d (every node: pos=(epoch+start_pos)%%n)",
+                start_pos,
+            )
         self._connect_param_socket()
         if getattr(self.policy, "skips_learning", lambda: False)():
             self.last_metrics_file = self._get_latest_metrics_file()

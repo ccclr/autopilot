@@ -169,13 +169,18 @@ class CMABActionEncodingTests(unittest.TestCase):
             earliest = trainer._get_earliest_metrics_file()
             self.assertEqual(earliest.name, "global_state_epoch_2.json")
 
-    def test_round_robin_covers_catalog_then_repeats(self) -> None:
+    def _round_robin(self, start_pos: int = 0) -> CMABPolicy:
         policy = CMABPolicy(
             arms=ARMS,
             feature_dim=5,
             policy_name="round_robin",
             random_state=0,
         )
+        policy.set_round_robin_start_pos(start_pos)
+        return policy
+
+    def test_round_robin_covers_catalog_then_repeats(self) -> None:
+        policy = self._round_robin(0)
         n = len(ARMS)
         first = [policy.select_arm(None, epoch=i) for i in range(n)]
         self.assertEqual(sorted(first), sorted(ARMS))
@@ -183,14 +188,8 @@ class CMABActionEncodingTests(unittest.TestCase):
         self.assertEqual(first, second)
 
     def test_round_robin_skips_learning_and_matches_across_nodes(self) -> None:
-        kwargs = dict(
-            arms=ARMS,
-            feature_dim=5,
-            policy_name="round_robin",
-            random_state=0,
-        )
-        policy = CMABPolicy(**kwargs)
-        other = CMABPolicy(**kwargs)
+        policy = self._round_robin(0)
+        other = self._round_robin(0)
         self.assertTrue(policy.skips_learning())
         for epoch in range(len(ARMS) + 3):
             self.assertEqual(
@@ -202,17 +201,26 @@ class CMABActionEncodingTests(unittest.TestCase):
         self.assertEqual(len(policy._y), before)
 
     def test_round_robin_late_node_uses_epoch_not_local_step(self) -> None:
-        early = CMABPolicy(
-            arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
-        )
-        late = CMABPolicy(
-            arms=ARMS, feature_dim=5, policy_name="round_robin", random_state=0
-        )
+        early = self._round_robin(0)
+        late = self._round_robin(0)
         for epoch in range(5):
             early.select_arm(None, epoch=epoch)
         self.assertEqual(
             late.select_arm(None, epoch=5),
             early.select_arm(None, epoch=5),
+        )
+
+    def test_round_robin_start_pos_is_shared_resume_point(self) -> None:
+        resumed = self._round_robin(39)
+        baseline = self._round_robin(0)
+        self.assertEqual(
+            resumed.select_arm(None, epoch=0),
+            baseline.select_arm(None, epoch=39),
+        )
+        other = self._round_robin(39)
+        self.assertEqual(
+            resumed.select_arm(None, epoch=0),
+            other.select_arm(None, epoch=0),
         )
 
 
