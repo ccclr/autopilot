@@ -233,6 +233,7 @@ class LocalBench:
                 self.bench_parameters, 'enable_factorized_reward', False
             )
             cmab_policy = getattr(self.bench_parameters, 'cmab_policy', 'rf_ts')
+            cmab_start_pos = getattr(self.bench_parameters, 'cmab_start_pos', 0)
             Print.info(f'RL algo: {rl_algo}')
             if rl_algo in ('cmab', 'xgboost'):
                 Print.info(f'Action encoding: {cmab_action_encoding}')
@@ -240,6 +241,7 @@ class LocalBench:
             Print.info(f'RL warmup iterations: {warmup_iterations}')
             Print.info(f'RL factorized reward: enabled={enable_factorized_reward}')
             Print.info(f'CMAB policy: {cmab_policy}')
+            Print.info(f'CMAB start pos: {cmab_start_pos}')
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
             if resume_from:
                 Print.info(f'RL resume-from: {resume_from}')
@@ -263,6 +265,7 @@ class LocalBench:
                         enable_factorized_reward if rl_algo == 'cmab' else None
                     ),
                     cmab_policy=(cmab_policy if rl_algo == 'cmab' else None),
+                    cmab_start_pos=(cmab_start_pos if rl_algo == 'cmab' else None),
                 )
                 log_file = join(PathMaker.logs_path(), f'controller-{i}.log')
                 self._background_run(cmd, log_file)

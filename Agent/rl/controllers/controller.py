@@ -110,6 +110,7 @@ class AutopilotController:
         accelerator_period: int = 100,
         enable_factorized_reward: bool = False,
         cmab_policy: str = "rf_ts",
+        cmab_start_pos: int = 0,
     ):
         """
         Initialize controller
@@ -131,6 +132,8 @@ class AutopilotController:
                 a single global-reward forest.
             cmab_policy: forwarded to the trainer as --policy
                 (rf_ts / random / default / round_robin).
+            cmab_start_pos: round-robin catalog index for consensus epoch 0.
+                Every node must receive the same value.
         """
         self.metrics_dir = Path(metrics_dir)
         self.parameters_file = Path(parameters_file)
@@ -153,6 +156,9 @@ class AutopilotController:
         self.cmab_policy = str(cmab_policy or "rf_ts").lower()
         if self.cmab_policy not in ("rf_ts", "random", "default", "round_robin"):
             raise ValueError(f"Unsupported CMAB policy: {self.cmab_policy}")
+        self.cmab_start_pos = int(cmab_start_pos)
+        if self.cmab_start_pos < 0:
+            raise ValueError("CMAB start pos must be an integer >= 0")
         if self.rl_algo not in ("cmab", "xgboost", "gp_bo", "kernel_ucb"):
             raise ValueError(f"Unsupported rl_algo: {self.rl_algo}")
         # Agent/rl root (parent of controllers/)
@@ -247,6 +253,7 @@ class AutopilotController:
                 cmd.append("--enable-factorized-reward")
             if self.rl_algo == "cmab":
                 cmd.extend(["--policy", str(self.cmab_policy)])
+                cmd.extend(["--start-pos", str(self.cmab_start_pos)])
             if self.rl_algo in ("cmab", "xgboost"):
                 cmd.extend(
                     ["--action-encoding", str(self.cmab_action_encoding)]
@@ -406,6 +413,12 @@ def main():
         help='CMAB selection policy forwarded to train_cmab_continuous.py',
     )
     parser.add_argument(
+        '--start-pos',
+        type=int,
+        default=0,
+        help='Round-robin catalog index used at consensus epoch 0 (all nodes)',
+    )
+    parser.add_argument(
         '--enable-accelerator',
         action='store_true',
         help='Enable periodic latency probing to prune fast_path_timeout',
@@ -431,6 +444,7 @@ def main():
     print(f"🔥 Warmup iterations: {args.warmup_iterations}")
     print(f"🧩 Factorized reward: enabled={args.enable_factorized_reward}")
     print(f"🎯 CMAB policy: {args.policy}")
+    print(f"📍 CMAB start pos: {args.start_pos}")
     print(f"⚡ Accelerator: enabled={args.enable_accelerator} period={args.accelerator_period} epochs")
 
     # Logger will be initialized by AutopilotController
@@ -451,6 +465,7 @@ def main():
             accelerator_period=args.accelerator_period,
             enable_factorized_reward=args.enable_factorized_reward,
             cmab_policy=args.policy,
+            cmab_start_pos=args.start_pos,
         )
         print("✅ Controller initialized successfully")
     except Exception as e:

@@ -147,6 +147,33 @@ class CMABActionEncodingConfigTests(TestCase):
 
         self.assertIn('--policy round_robin', command)
 
+    def test_cmab_start_pos_defaults_to_zero(self):
+        parameters = BenchParameters(_parameters())
+
+        self.assertEqual(parameters.cmab_start_pos, 0)
+
+    def test_accepts_cmab_start_pos(self):
+        parameters = BenchParameters(_parameters(cmab_start_pos=39))
+
+        self.assertEqual(parameters.cmab_start_pos, 39)
+
+    def test_rejects_negative_cmab_start_pos(self):
+        with self.assertRaisesRegex(ConfigError, 'cmab_start_pos'):
+            BenchParameters(_parameters(cmab_start_pos=-1))
+
+    def test_controller_command_contains_start_pos(self):
+        command = CommandMaker.run_controller(
+            node_index=0,
+            repo_name='autopilot',
+            log_dir='/local/logs',
+            parameters_file='/local/.parameters.json',
+            rl_algo='cmab',
+            cmab_policy='round_robin',
+            cmab_start_pos=39,
+        )
+
+        self.assertIn('--start-pos 39', command)
+
 
 if __name__ == '__main__':
     import unittest

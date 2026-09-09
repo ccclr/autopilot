@@ -45,6 +45,12 @@ def main():
     parser.add_argument("--epsilon", type=float, default=0, help="Epsilon-greedy exploration rate")
     parser.add_argument("--max-arms", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--start-pos",
+        type=int,
+        default=0,
+        help="Round-robin catalog index at consensus epoch 0 (shared by all nodes).",
+    )
     parser.add_argument("--metrics-timeout", type=int, default=300)
     parser.add_argument("--resume-from", type=str, default=None)
     parser.add_argument("--node-index", type=int, default=0)
@@ -110,6 +116,10 @@ def main():
             random_state=args.seed,
             action_encoding=args.action_encoding,
         )
+    if args.policy == "round_robin":
+        start_pos = max(0, int(args.start_pos))
+        policy.set_round_robin_start_pos(start_pos)
+        logger.info("round_robin start_pos=%d (pos=(epoch+start_pos)%%n)", start_pos)
     if args.resume_from:
         policy.load(args.resume_from)
         logger.info("Loaded CMAB policy from %s", args.resume_from)

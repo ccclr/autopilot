@@ -183,6 +183,7 @@ def remote(
     duration=10800,
     enable_factorized_reward=True,
     cmab_policy='rf_ts',
+    cmab_start_pos=0,
 ):
     ''' Run benchmarks on CloudLab. '''
     encoding = str(cmab_action_encoding).lower()
@@ -193,6 +194,12 @@ def remote(
         raise ValueError(
             'cmab_policy must be one of rf_ts, random, default, round_robin'
         )
+    try:
+        start_pos = int(cmab_start_pos)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('cmab_start_pos must be an integer >= 0') from exc
+    if start_pos < 0:
+        raise ValueError('cmab_start_pos must be an integer >= 0')
     factorized = bool(enable_factorized_reward)
     resume_from = "/users/clr0302/checkpoints/cmab_factorized/cmab_checkpoint_50.pkl"
     applied_begin = 42
@@ -225,6 +232,7 @@ def remote(
         'cmab_seed': int(cmab_seed),
         'rl_warmup_iterations': 5,
         'cmab_policy': policy,
+        'cmab_start_pos': start_pos,
         # False: keep the current global-reward RF (numeric/one_hot).
         # True: switch the trainer to FactorizedCMABPolicy. Do not resume from
         # a global RF checkpoint when this is True; set cmab_resume_from=None.

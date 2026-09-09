@@ -9,9 +9,9 @@ from sklearn.ensemble import RandomForestRegressor
 
 logger = logging.getLogger(__name__)
 
-# Shared resume point for every node. Consensus epoch 0 selects shuffled
-# catalog[ROUND_ROBIN_START_POS]. Set back to 0 for a fresh sweep.
-ROUND_ROBIN_START_POS = 39
+# Shared resume fallback if the trainer is started without --start-pos.
+# Prefer fab remote --cmab-start-pos so every node gets the same value.
+ROUND_ROBIN_START_POS = 0
 
 
 class CMABPolicy:

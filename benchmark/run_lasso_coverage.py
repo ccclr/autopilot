@@ -122,12 +122,13 @@ def slot_stats() -> dict:
     }
 
 
-def start_fab() -> subprocess.Popen:
+def start_fab(start_pos: int = 0) -> subprocess.Popen:
     cmd = [
         "fab",
         "remote",
         "--cmab-policy=round_robin",
         "--cmab-seed=0",
+        f"--cmab-start-pos={int(start_pos)}",
         f"--duration={FAB_DURATION}",
     ]
     EXP_DIR.mkdir(parents=True, exist_ok=True)
@@ -166,9 +167,9 @@ def stop_fab(proc: subprocess.Popen | None) -> None:
     kill_cluster()
 
 
-def run_attempt(attempt: int) -> dict:
-    log(f"attempt {attempt}: starting fab remote round_robin")
-    proc = start_fab()
+def run_attempt(attempt: int, start_pos: int = 0) -> dict:
+    log(f"attempt {attempt}: starting fab remote round_robin start_pos={start_pos}")
+    proc = start_fab(start_pos=start_pos)
     t0 = time.time()
     last_n = 0
     last_progress = time.time()
@@ -207,7 +208,15 @@ def main() -> int:
         action="store_true",
         help="Archive and wipe metrics-0 before starting (default: resume in place)",
     )
+    parser.add_argument(
+        "--start-pos",
+        type=int,
+        default=0,
+        help="Round-robin catalog index at consensus epoch 0 (passed to all nodes)",
+    )
     args = parser.parse_args()
+    if args.start_pos < 0:
+        parser.error("--start-pos must be >= 0")
 
     EXP_DIR.mkdir(parents=True, exist_ok=True)
     kill_cluster()
@@ -220,9 +229,10 @@ def main() -> int:
             f"resume in place: windows={stats['n']} unique_arms={stats['unique']} "
             f"k={stats['k_vals']} epochs={stats['epoch_min']}..{stats['epoch_max']}"
         )
+    log(f"cmab_start_pos={args.start_pos}")
     last = {}
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        last = run_attempt(attempt)
+        last = run_attempt(attempt, start_pos=args.start_pos)
         if last.get("status") == "ok":
             break
         log(f"attempt {attempt} ended status={last.get('status')}")

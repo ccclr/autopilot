@@ -335,6 +335,14 @@ class BenchParameters:
                 )
             self.cmab_policy = cmab_policy
 
+            try:
+                cmab_start_pos = int(json.get('cmab_start_pos', 0) or 0)
+            except (TypeError, ValueError) as e:
+                raise ConfigError('cmab_start_pos must be an integer >= 0') from e
+            if cmab_start_pos < 0:
+                raise ConfigError('cmab_start_pos must be an integer >= 0')
+            self.cmab_start_pos = cmab_start_pos
+
             # Probe every N consensus epochs on node 0; all nodes apply at detect_epoch+5.
             acc_period = json.get('accelerator_period', 100)
             if acc_period in (None, ''):
