@@ -53,8 +53,8 @@ def main():
         "--enable-pairwise-residual-rf",
         action="store_true",
         help=(
-            "Add a small cut_condition_type x fast_path_timeout RF trained "
-            "on pre-update Global RF residuals"
+            "Add a small state + cut_condition_type + fast_path_timeout RF "
+            "trained on pre-update Global RF residuals"
         ),
     )
     parser.add_argument("--max-arms", type=int, default=None)
@@ -126,6 +126,11 @@ def main():
                     "warmup_iterations": warmup_iterations,
                     "action_encoding": args.action_encoding,
                     "pairwise_residual_rf": args.enable_pairwise_residual_rf,
+                    "pairwise_feature_schema": (
+                        CMABPolicy.PAIRWISE_FEATURE_SCHEMA
+                        if args.enable_pairwise_residual_rf
+                        else None
+                    ),
                 },
             )
             logger.info(

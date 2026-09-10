@@ -53,13 +53,24 @@ class CMABPairwiseResidualTests(unittest.TestCase):
         self.assertEqual(policy._pair_y, [])
         self.assertFalse(policy._pair_rf_is_fitted)
 
-    def test_pair_features_use_only_cut_and_timeout(self) -> None:
+    def test_pair_features_use_state_cut_and_timeout(self) -> None:
         policy = self._policy(True)
+        context = [0.2, 0.4, 0.6, 0.8, 1.0]
 
         np.testing.assert_array_equal(
-            policy._pair_feature_row(ARMS[1]),
-            np.asarray([4, 200], dtype=np.float32),
+            policy._pair_feature_row(context, ARMS[1]),
+            np.asarray([0.2, 0.4, 0.6, 0.8, 1.0, 4, 200], dtype=np.float32),
         )
+
+    def test_pair_feature_matrix_repeats_state_for_each_arm(self) -> None:
+        policy = self._policy(True)
+        context = [0.2, 0.4, 0.6, 0.8, 1.0]
+
+        features = policy._pair_feature_matrix(context, ARMS)
+
+        self.assertEqual(features.shape, (2, 7))
+        np.testing.assert_allclose(features[0, :5], context)
+        np.testing.assert_allclose(features[1, :5], context)
 
     def test_pairwise_rf_starts_with_zero_cold_start_residual(self) -> None:
         policy = self._policy(True)
@@ -121,6 +132,23 @@ class CMABPairwiseResidualTests(unittest.TestCase):
 
             self.assertTrue(target._pair_rf_is_fitted)
             self.assertEqual(target._pair_y, [0.0])
+
+    def test_old_pairwise_checkpoint_is_rejected(self) -> None:
+        source = self._policy(True)
+        source.update([ARMS[0]], [1.25], contexts=[[0.2] * 5])
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "cmab_pair_old.pkl"
+            source.save(checkpoint)
+
+            import joblib
+
+            data = joblib.load(checkpoint)
+            data.pop("pair_feature_schema")
+            data["pair_X"] = [row[-2:] for row in data["pair_X"]]
+            joblib.dump(data, checkpoint)
+
+            with self.assertRaisesRegex(ValueError, "feature schema mismatch"):
+                self._policy(True).load(checkpoint)
 
 
 if __name__ == "__main__":

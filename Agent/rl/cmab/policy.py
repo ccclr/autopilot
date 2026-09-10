@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class CMABPolicy:
     ACTION_ENCODINGS = ("numeric", "one_hot")
     PAIRWISE_RESIDUAL_KEYS = ("cut_condition_type", "fast_path_timeout")
+    PAIRWISE_FEATURE_SCHEMA = "state_plus_cut_condition_type_fast_path_timeout_v2"
 
     def __init__(
         self,
@@ -60,8 +61,8 @@ class CMABPolicy:
             verbose=2,
             random_state=self._random_state,
         )
-        # Optional low-capacity correction model. It learns only the residual
-        # associated with cut_condition_type x fast_path_timeout; the legacy
+        # Optional low-capacity correction model. Its input is the current
+        # state plus cut_condition_type and fast_path_timeout. The legacy
         # global-only path remains unchanged while the feature is disabled.
         self._pair_rf = None
         if self.enable_pairwise_residual_rf:
@@ -179,10 +180,13 @@ class CMABPolicy:
             values[key] = float(value)
         return values
 
-    def _pair_feature_row(self, arm) -> np.ndarray:
+    def _pair_feature_row(self, context, arm) -> np.ndarray:
+        if context is None:
+            raise ValueError("Pairwise residual RF requires a state context")
+        state = np.asarray(context, dtype=np.float32).flatten()
         values = self._arm_values(arm)
         try:
-            return np.asarray(
+            pair = np.asarray(
                 [values[key] for key in self.PAIRWISE_RESIDUAL_KEYS],
                 dtype=np.float32,
             )
@@ -190,9 +194,12 @@ class CMABPolicy:
             raise ValueError(
                 f"CMAB arm is missing pairwise parameter {error.args[0]!r}: {arm!r}"
             ) from error
+        return np.concatenate([state, pair])
 
-    def _pair_feature_matrix(self, arms) -> np.ndarray:
-        return np.asarray([self._pair_feature_row(arm) for arm in arms])
+    def _pair_feature_matrix(self, context, arms) -> np.ndarray:
+        return np.asarray(
+            [self._pair_feature_row(context, arm) for arm in arms]
+        )
 
     def _feature_matrix(self, context, arms=None):
         """为候选 arm 构建特征矩阵，用于一次性预测。"""
@@ -295,7 +302,7 @@ class CMABPolicy:
             and self._pair_rf is not None
             and self._pair_rf_is_fitted
         ):
-            pair_features = self._pair_feature_matrix(candidates)
+            pair_features = self._pair_feature_matrix(context, candidates)
             pair_preds = np.stack(
                 [tree.predict(pair_features) for tree in self._pair_rf.estimators_]
             )
@@ -383,7 +390,7 @@ class CMABPolicy:
                 else:
                     global_prediction = float(reward)
                     pair_residual = 0.0
-                self._pair_X.append(self._pair_feature_row(arm))
+                self._pair_X.append(self._pair_feature_row(context, arm))
                 self._pair_y.append(pair_residual)
                 logger.info(
                     "PAIRWISE_RESIDUAL_SAMPLE idx=%d pair=%s target=%.6f "
@@ -457,10 +464,12 @@ class CMABPolicy:
                 )
                 logger.info(
                     "PAIRWISE_RESIDUAL_RF_UPDATED samples=%d replay=%d "
-                    "bootstrap=%d mse=%.6f",
+                    "bootstrap=%d feature_dim=%d schema=%s mse=%.6f",
                     len(pair_y),
                     pair_replay_length,
                     len(pair_bootstrapped_idx),
+                    int(pair_X.shape[1]),
+                    self.PAIRWISE_FEATURE_SCHEMA,
                     pair_mse,
                 )
 
@@ -481,6 +490,7 @@ class CMABPolicy:
             'action_encoding': self.action_encoding,
             'arms': list(self._arms),
             'enable_pairwise_residual_rf': self.enable_pairwise_residual_rf,
+            'pair_feature_schema': self.PAIRWISE_FEATURE_SCHEMA,
             'pair_rf': self._pair_rf,
             'pair_X': self._pair_X,
             'pair_y': self._pair_y,
@@ -512,6 +522,15 @@ class CMABPolicy:
         if self.enable_pairwise_residual_rf and data.get(
             'enable_pairwise_residual_rf', False
         ):
+            checkpoint_pair_schema = data.get('pair_feature_schema')
+            if checkpoint_pair_schema != self.PAIRWISE_FEATURE_SCHEMA:
+                raise ValueError(
+                    "CMAB pairwise checkpoint feature schema mismatch: "
+                    f"checkpoint={checkpoint_pair_schema!r}, "
+                    f"configured={self.PAIRWISE_FEATURE_SCHEMA!r}. "
+                    "Old cut+timeout checkpoints cannot initialize the "
+                    "state+cut+timeout pairwise RF."
+                )
             self._pair_rf = data['pair_rf']
             self._pair_X = data.get('pair_X', [])
             self._pair_y = data.get('pair_y', [])
