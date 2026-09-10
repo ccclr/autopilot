@@ -37,7 +37,7 @@ class ActionCodec:
             self.header_size_values = [32, 64]  # 32 to 256 bytes
             self.cut_condition_type_values = [2, 3, 4]  # 1 to 2f+1 (reasonable cut conditions)
             # Discrete grid kept for CMAB; GP-BO uses continuous bounds below.
-            self.fast_path_timeout_ms_values = [0, 100, 300]
+            self.fast_path_timeout_ms_values = [0, 100, 200, 300]
             self.fast_path_timeout_ms_bounds = (0, 300)  # continuous ms interval for GP-BO
             self.parallel_proposals_values = [1, 4]  # 1 to 3 parallel proposals
             # self.use_optimistic_tips_values = [True, False]  # True or False
@@ -62,10 +62,10 @@ class ActionCodec:
         # Step 2: Define action dimensions (number of choices for each parameter)
         # PPO will predict indices in range [0, dim-1] for each dimension
         self.action_dims = [
-            len(self.batch_size_values),  # 3 choices: indices 0, 1, 2
-            len(self.header_size_values),  # 3 choices: indices 0, 1, 2
-            len(self.cut_condition_type_values),  # 2 choices: indices 0, 1
-            len(self.fast_path_timeout_ms_values),  # 3 choices: indices 0, 1, 2
+            len(self.batch_size_values),  # 2 choices: indices 0, 1
+            len(self.header_size_values),  # 2 choices: indices 0, 1
+            len(self.cut_condition_type_values),  # 3 choices: indices 0, 1, 2
+            len(self.fast_path_timeout_ms_values),  # 4 choices: indices 0, 1, 2, 3
             len(self.parallel_proposals_values),  # 2 choices: indices 0, 1
             # len(self.use_optimistic_tips_values),  # 2 choices: indices 0, 1
         ]

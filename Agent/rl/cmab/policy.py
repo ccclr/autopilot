@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 class CMABPolicy:
     ACTION_ENCODINGS = ("numeric", "one_hot")
+    PAIRWISE_RESIDUAL_KEYS = ("cut_condition_type", "fast_path_timeout")
 
     def __init__(
         self,
@@ -25,6 +26,7 @@ class CMABPolicy:
         min_epsilon: float = 0,
         replay_window: int = 200,
         action_encoding: str = "numeric",
+        enable_pairwise_residual_rf: bool = False,
     ):
         self._arms = list(arms)
         if len(set(self._arms)) != len(self._arms):
@@ -48,6 +50,7 @@ class CMABPolicy:
         self._epsilon_decay = float(epsilon_decay)
         self._min_epsilon = float(min_epsilon)
         self._replay_window = max(1, int(replay_window))
+        self.enable_pairwise_residual_rf = bool(enable_pairwise_residual_rf)
         
         self._rf = RandomForestRegressor(
             n_estimators=n_estimators,
@@ -57,11 +60,27 @@ class CMABPolicy:
             verbose=2,
             random_state=self._random_state,
         )
+        # Optional low-capacity correction model. It learns only the residual
+        # associated with cut_condition_type x fast_path_timeout; the legacy
+        # global-only path remains unchanged while the feature is disabled.
+        self._pair_rf = None
+        if self.enable_pairwise_residual_rf:
+            self._pair_rf = RandomForestRegressor(
+                n_estimators=20,
+                max_depth=3,
+                min_samples_leaf=4,
+                bootstrap=True,
+                verbose=0,
+                random_state=self._random_state + 1,
+            )
         
         self._is_fitted = False
         self._update_count = 0
         self._X = []
         self._y = []
+        self._pair_X = []
+        self._pair_y = []
+        self._pair_rf_is_fitted = False
         
         self.arm_counts = {arm: 0 for arm in arms}
         self.uses_context = uses_context
@@ -103,14 +122,19 @@ class CMABPolicy:
         decayed = self.epsilon * (self._epsilon_decay ** self._update_count)
         return max(self._min_epsilon, decayed)
 
-    def _bootstrap_indices(self, replay_length: int, shared_seed_hex: str | None) -> np.ndarray:
+    def _bootstrap_indices(
+        self,
+        replay_length: int,
+        shared_seed_hex: str | None,
+        label: str = "outer_bootstrap",
+    ) -> np.ndarray:
         if replay_length <= 0:
             return np.array([], dtype=np.int64)
         # Keep external bootstrap deterministic across nodes.
         if shared_seed_hex is not None:
-            seed_u64 = self._stable_int(shared_seed_hex, "outer_bootstrap", self._update_count, replay_length)
+            seed_u64 = self._stable_int(shared_seed_hex, label, self._update_count, replay_length)
         else:
-            seed_u64 = self._stable_int(self._random_state, "outer_bootstrap", self._update_count, replay_length)
+            seed_u64 = self._stable_int(self._random_state, label, self._update_count, replay_length)
         rng = np.random.default_rng(seed_u64)
         return rng.choice(replay_length, replay_length, replace=True)
 
@@ -141,6 +165,34 @@ class CMABPolicy:
             ctx_vec = np.array(context).flatten()
             return np.concatenate([ctx_vec, arm_vec])
         return arm_vec
+
+    @staticmethod
+    def _arm_values(arm) -> dict[str, float]:
+        if not isinstance(arm, str) or "=" not in arm:
+            raise ValueError(
+                "Pairwise residual RF requires named CMAB arms, got "
+                f"{arm!r}"
+            )
+        values = {}
+        for part in arm.split(","):
+            key, value = part.split("=", 1)
+            values[key] = float(value)
+        return values
+
+    def _pair_feature_row(self, arm) -> np.ndarray:
+        values = self._arm_values(arm)
+        try:
+            return np.asarray(
+                [values[key] for key in self.PAIRWISE_RESIDUAL_KEYS],
+                dtype=np.float32,
+            )
+        except KeyError as error:
+            raise ValueError(
+                f"CMAB arm is missing pairwise parameter {error.args[0]!r}: {arm!r}"
+            ) from error
+
+    def _pair_feature_matrix(self, arms) -> np.ndarray:
+        return np.asarray([self._pair_feature_row(arm) for arm in arms])
 
     def _feature_matrix(self, context, arms=None):
         """为候选 arm 构建特征矩阵，用于一次性预测。"""
@@ -237,6 +289,26 @@ class CMABPolicy:
 
         mean = all_preds.mean(axis=0)
         std = all_preds.std(axis=0)
+        global_mean = mean.copy()
+        if (
+            self.enable_pairwise_residual_rf
+            and self._pair_rf is not None
+            and self._pair_rf_is_fitted
+        ):
+            pair_features = self._pair_feature_matrix(candidates)
+            pair_preds = np.stack(
+                [tree.predict(pair_features) for tree in self._pair_rf.estimators_]
+            )
+            pair_mean = pair_preds.mean(axis=0)
+            mean = global_mean + pair_mean
+            logger.info(
+                "PAIRWISE_RESIDUAL_INFERENCE pair=%s global_top=%.6f "
+                "pair_at_global_top=%.6f final_top=%.6f",
+                "x".join(self.PAIRWISE_RESIDUAL_KEYS),
+                float(global_mean.max()),
+                float(pair_mean[int(np.argmax(global_mean))]),
+                float(mean.max()),
+            )
 
         def _fmt_list(values, idxs):
             return "[" + ", ".join(f"{values[i]:.6f}" for i in idxs) + "]"
@@ -299,6 +371,29 @@ class CMABPolicy:
                 )
                 continue
             feature_row = self._feature_row(context, arm)
+            if self.enable_pairwise_residual_rf:
+                # Pre-update residual: the fitted global RF has not seen this
+                # newly arrived sample. At cold start there is no prediction,
+                # so use a zero residual instead of counting reward twice.
+                if self._is_fitted:
+                    global_prediction = float(
+                        self._rf.predict(np.asarray([feature_row]))[0]
+                    )
+                    pair_residual = float(reward) - global_prediction
+                else:
+                    global_prediction = float(reward)
+                    pair_residual = 0.0
+                self._pair_X.append(self._pair_feature_row(arm))
+                self._pair_y.append(pair_residual)
+                logger.info(
+                    "PAIRWISE_RESIDUAL_SAMPLE idx=%d pair=%s target=%.6f "
+                    "reward=%.6f preupdate_global=%.6f",
+                    len(self._pair_y),
+                    "x".join(self.PAIRWISE_RESIDUAL_KEYS),
+                    pair_residual,
+                    float(reward),
+                    global_prediction,
+                )
             self._X.append(feature_row)
             self._y.append(float(reward))
             self.arm_counts[arm] += 1
@@ -340,6 +435,35 @@ class CMABPolicy:
             self._rf.fit(training_X, training_y)
             self._is_fitted = True
 
+            if (
+                self.enable_pairwise_residual_rf
+                and self._pair_rf is not None
+                and self._pair_y
+            ):
+                pair_X = np.asarray(self._pair_X)
+                pair_y = np.asarray(self._pair_y)
+                pair_replay_length = min(len(pair_y), self._replay_window)
+                pair_bootstrapped_idx = self._bootstrap_indices(
+                    pair_replay_length,
+                    shared_seed_hex,
+                    label="pair_outer_bootstrap",
+                )
+                pair_training_X = pair_X[-pair_replay_length:][pair_bootstrapped_idx, :]
+                pair_training_y = pair_y[-pair_replay_length:][pair_bootstrapped_idx]
+                self._pair_rf.fit(pair_training_X, pair_training_y)
+                self._pair_rf_is_fitted = True
+                pair_mse = float(
+                    np.mean((self._pair_rf.predict(pair_X) - pair_y) ** 2)
+                )
+                logger.info(
+                    "PAIRWISE_RESIDUAL_RF_UPDATED samples=%d replay=%d "
+                    "bootstrap=%d mse=%.6f",
+                    len(pair_y),
+                    pair_replay_length,
+                    len(pair_bootstrapped_idx),
+                    pair_mse,
+                )
+
             mse = np.mean((self._rf.predict(X) - y)**2)
             logger.info(
                 "RF Updated: samples=%d, replay=%d, bootstrap=%d, MSE=%.6f",
@@ -356,6 +480,11 @@ class CMABPolicy:
             'update_count': self._update_count,
             'action_encoding': self.action_encoding,
             'arms': list(self._arms),
+            'enable_pairwise_residual_rf': self.enable_pairwise_residual_rf,
+            'pair_rf': self._pair_rf,
+            'pair_X': self._pair_X,
+            'pair_y': self._pair_y,
+            'pair_rf_is_fitted': self._pair_rf_is_fitted,
         }, path)
 
     def load(self, path):
@@ -380,3 +509,15 @@ class CMABPolicy:
         self._y = data['y']
         self._is_fitted = data['is_fitted']
         self._update_count = data['update_count']
+        if self.enable_pairwise_residual_rf and data.get(
+            'enable_pairwise_residual_rf', False
+        ):
+            self._pair_rf = data['pair_rf']
+            self._pair_X = data.get('pair_X', [])
+            self._pair_y = data.get('pair_y', [])
+            self._pair_rf_is_fitted = data.get('pair_rf_is_fitted', False)
+        elif self.enable_pairwise_residual_rf:
+            logger.info(
+                "Loaded global-only CMAB checkpoint; pairwise residual RF "
+                "will start from the next valid sample"
+            )

@@ -5,6 +5,8 @@
 *.swp
 *.swo
 .DS_Store
+__pycache__/
+*.py[cod]
 
 # Local benchmark runtime files
 benchmark/.committee.json

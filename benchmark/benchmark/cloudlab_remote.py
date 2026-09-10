@@ -870,6 +870,13 @@ class CloudLabBench:
             enable_cmab_protocol_rules = bool(
                 getattr(bench_parameters, 'enable_cmab_protocol_rules', False)
             )
+            enable_cmab_pairwise_residual_rf = bool(
+                getattr(
+                    bench_parameters,
+                    'enable_cmab_pairwise_residual_rf',
+                    False,
+                )
+            )
             max_training_iterations = getattr(
                 bench_parameters, 'rl_max_training_iterations', 200
             )
@@ -922,6 +929,10 @@ class CloudLabBench:
                     f'{enable_cmab_protocol_rules}'
                 )
                 Print.info(
+                    'CMAB pairwise residual RF enabled: '
+                    f'{enable_cmab_pairwise_residual_rf}'
+                )
+                Print.info(
                     'CMAB offline transition export: '
                     f'{bool(cmab_transition_export_dir)}'
                 )
@@ -963,7 +974,7 @@ class CloudLabBench:
             if rl_algo == 'coverage_round_robin':
                 Print.info(
                     'Coverage collection: centralized node0, '
-                    '72 actions in seeded shuffled cycles, '
+                    '96 actions in seeded shuffled cycles, '
                     f'seed={getattr(bench_parameters, "coverage_seed", 0)}'
                 )
                 Print.info(
@@ -1082,6 +1093,10 @@ class CloudLabBench:
                     ),
                     enable_cmab_protocol_rules=(
                         enable_cmab_protocol_rules if rl_algo == 'cmab' else False
+                    ),
+                    enable_cmab_pairwise_residual_rf=(
+                        enable_cmab_pairwise_residual_rf
+                        if rl_algo == 'cmab' else False
                     ),
                     cmab_transition_export_dir=cmab_transition_export_dir,
                     cmab_environment_label=(

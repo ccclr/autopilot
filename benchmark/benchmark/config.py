@@ -340,6 +340,16 @@ class BenchParameters:
                     'cmab_action_encoding must be "numeric" or "one_hot"'
                 )
             self.cmab_action_encoding = cmab_action_encoding.lower()
+            enable_cmab_pairwise_residual_rf = json.get(
+                'enable_cmab_pairwise_residual_rf', False
+            )
+            if not isinstance(enable_cmab_pairwise_residual_rf, bool):
+                raise ConfigError(
+                    'enable_cmab_pairwise_residual_rf must be true or false'
+                )
+            self.enable_cmab_pairwise_residual_rf = (
+                enable_cmab_pairwise_residual_rf
+            )
             if self.rl_algo == 'coverage_round_robin' and self.enable_checkpoint:
                 raise ConfigError(
                     'coverage_round_robin is a data collector and cannot load '

@@ -348,6 +348,7 @@ class CommandMaker:
         coverage_seed=None,
         cmab_seed=None,
         enable_cmab_protocol_rules=False,
+        enable_cmab_pairwise_residual_rf=False,
         cmab_transition_export_dir=None,
         cmab_environment_label=None,
         cmab_transition_run_id=None,
@@ -377,6 +378,8 @@ class CommandMaker:
             cmd += f' --warmup-iterations {int(warmup_iterations)}'
         if enable_cmab_protocol_rules:
             cmd += ' --enable-cmab-protocol-rules'
+        if enable_cmab_pairwise_residual_rf:
+            cmd += ' --enable-cmab-pairwise-residual-rf'
         if cmab_transition_export_dir:
             cmd += (
                 ' --cmab-transition-export-dir '

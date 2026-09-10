@@ -433,10 +433,15 @@ The CMAB controls 5 consensus parameters, defining a discrete arm space:
 | `batch_size` | {100k, 500k} | 2 |
 | `header_size` | {32, 64} | 2 |
 | `cut_condition_type` | {1, 3, 4} | 3 |
-| `fast_path_timeout` | {0, 100, 300}ms | 3 |
+| `fast_path_timeout` | {0, 100, 200, 300}ms | 4 |
 | `k` (parallel instances) | {1, 4} | 2 |
 
-**Total Arms**: 2 × 2 × 3 × 3 × 2 = **72 possible configurations**
+**Total Arms**: 2 × 2 × 3 × 4 × 2 = **96 possible configurations**
+
+The standard CMAB uses only its Global RF. Set
+`enable_cmab_pairwise_residual_rf=true` to add the optional small RF over
+`cut_condition_type × fast_path_timeout`; it learns the Global RF's pre-update
+reward residual and its prediction is added directly to the Global RF score.
 
 ### Reward Calculation:**
 - Per-node: `reward = 1000 / (latency_ms + 1)`

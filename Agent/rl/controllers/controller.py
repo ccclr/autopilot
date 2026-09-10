@@ -136,6 +136,7 @@ class AutopilotController:
         cmab_environment_label: str = "unlabeled",
         cmab_transition_run_id: Optional[str] = None,
         cmab_action_encoding: str = "numeric",
+        enable_cmab_pairwise_residual_rf: bool = False,
     ):
         """
         Initialize controller
@@ -166,6 +167,9 @@ class AutopilotController:
             raise ValueError(
                 "CMAB action encoding must be 'numeric' or 'one_hot'"
             )
+        self.enable_cmab_pairwise_residual_rf = bool(
+            enable_cmab_pairwise_residual_rf
+        )
         self.warmup_iterations = max(0, int(warmup_iterations))
         if max_training_iterations is not None and max_training_iterations <= 0:
             raise ValueError("max_training_iterations must be positive or None")
@@ -342,6 +346,11 @@ class AutopilotController:
                 )
             if self.rl_algo == "cmab" and self.enable_cmab_protocol_rules:
                 cmd.append("--enable-protocol-rules")
+            if (
+                self.rl_algo == "cmab"
+                and self.enable_cmab_pairwise_residual_rf
+            ):
+                cmd.append("--enable-pairwise-residual-rf")
             if self.rl_algo == "cmab":
                 cmd.extend(
                     [
@@ -541,6 +550,14 @@ def main():
         help='CMAB random-forest seed (default: 0)',
     )
     parser.add_argument(
+        '--enable-cmab-pairwise-residual-rf',
+        action='store_true',
+        help=(
+            'Enable the cut_condition_type x fast_path_timeout residual RF '
+            'on top of the standard CMAB Global RF'
+        ),
+    )
+    parser.add_argument(
         '--warmup-iterations',
         type=int,
         default=5,
@@ -582,7 +599,7 @@ def main():
         '--coverage-seed',
         type=int,
         default=0,
-        help='Seed for shuffled 72-action coverage cycles',
+        help='Seed for shuffled 96-action coverage cycles',
     )
     parser.add_argument(
         '--dqn-checkpoint-load-mode',
@@ -608,6 +625,7 @@ def main():
     print(f"🧠 RL algo: {args.rl_algo}")
     print(f"🔢 CMAB action encoding: {args.cmab_action_encoding}")
     print(f"🎲 CMAB random-forest seed: {args.cmab_seed}")
+    print(f"🧩 CMAB pairwise residual RF: {args.enable_cmab_pairwise_residual_rf}")
     print(f"🔁 Resume from: {args.resume_from}")
     print(f"🔥 Warmup iterations: {args.warmup_iterations}")
     max_iterations = (
@@ -635,6 +653,9 @@ def main():
             rl_algo=args.rl_algo,
             cmab_action_encoding=args.cmab_action_encoding,
             cmab_seed=args.cmab_seed,
+            enable_cmab_pairwise_residual_rf=(
+                args.enable_cmab_pairwise_residual_rf
+            ),
             warmup_iterations=args.warmup_iterations,
             max_training_iterations=args.max_training_iterations,
             kernel_ucb_alpha=args.kernel_ucb_alpha,

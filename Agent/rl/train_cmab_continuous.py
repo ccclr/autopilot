@@ -49,6 +49,14 @@ def main():
     )
     parser.add_argument("--context-mode", type=str, default="dynamic", choices=["dynamic", "full"])
     parser.add_argument("--epsilon", type=float, default=0, help="Epsilon-greedy exploration rate")
+    parser.add_argument(
+        "--enable-pairwise-residual-rf",
+        action="store_true",
+        help=(
+            "Add a small cut_condition_type x fast_path_timeout RF trained "
+            "on pre-update Global RF residuals"
+        ),
+    )
     parser.add_argument("--max-arms", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--metrics-timeout", type=int, default=300)
@@ -74,13 +82,14 @@ def main():
     logger.info("Starting Autopilot Continuous CMAB Training")
     logger.info(
         "metrics_dir=%s parameters_file=%s warmup=%d max_iterations=%s "
-        "protocol_rules=%s action_encoding=%s",
+        "protocol_rules=%s action_encoding=%s pairwise_residual_rf=%s",
         args.metrics_dir,
         args.parameters_file,
         warmup_iterations,
         args.num_iterations,
         args.enable_protocol_rules,
         args.action_encoding,
+        args.enable_pairwise_residual_rf,
     )
 
     codec = ActionCodec(policy=args.policy)
@@ -94,6 +103,7 @@ def main():
         epsilon=args.epsilon,
         random_state=args.seed,
         action_encoding=args.action_encoding,
+        enable_pairwise_residual_rf=args.enable_pairwise_residual_rf,
     )
     if args.resume_from:
         policy.load(args.resume_from)
@@ -115,6 +125,7 @@ def main():
                     "protocol_rules": args.enable_protocol_rules,
                     "warmup_iterations": warmup_iterations,
                     "action_encoding": args.action_encoding,
+                    "pairwise_residual_rf": args.enable_pairwise_residual_rf,
                 },
             )
             logger.info(

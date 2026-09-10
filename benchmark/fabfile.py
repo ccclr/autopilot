@@ -52,6 +52,9 @@ def local(ctx, debug=False):
         # Controls the CMAB random forest random_state. It does not replace
         # the per-epoch shared seed derived from the live protocol state.
         'cmab_seed': 0,
+        # Optional Global RF + residual RF over
+        # cut_condition_type x fast_path_timeout. False preserves CMAB.
+        'enable_cmab_pairwise_residual_rf': False,
         'rl_warmup_iterations': 5,
         # Maximum training iterations in this run. None = train until experiment ends.
         'rl_max_training_iterations': 200,
@@ -254,21 +257,22 @@ def remote(ctx, debug=False):
         'rl_algo': 'cmab',
         # CMAB-RF action representation. Use "numeric" for the existing
         # baseline and "one_hot" for the encoding comparison experiment.
-        'cmab_action_encoding': 'one_hot',
+        'cmab_action_encoding': 'numeric',
         # Keep this value paired between numeric and one_hot runs. Change it
         # between repetitions to measure sensitivity to RF initialization.
         'cmab_seed': 0,
+        # Set True to enable the optional pairwise residual RF. The standard
+        # Global-RF-only CMAB path remains available when this is False.
+        'enable_cmab_pairwise_residual_rf': False,
         'rl_warmup_iterations': 0,
         # None means training continues until the experiment ends.
         'rl_max_training_iterations': None,
         # One switch for the 8-epoch structured start, protocol filters, and
         # incumbent/candidate confirmation used by rule-guided CMAB.
         'enable_cmab_protocol_rules': False,
-        # Export strict, contiguous CMAB/coverage transitions on node0 for
-        # offline DQN.
-        # Each CloudLab run creates a separate directory under this /local root
-        # and archives that run's node0 metrics into its metrics-0 subdirectory.
-        'enable_cmab_transition_export': True,
+        # Keep disabled for the new 96-arm / pairwise-residual-RF experiments.
+        # Set True only for a deliberately planned offline-data collection run.
+        'enable_cmab_transition_export': False,
         'cmab_transition_export_dir': '/local/autopilot_offline_data',
         # Change this to B/C before collecting those environments.
         'cmab_environment_label': 'A',
@@ -311,7 +315,7 @@ def remote(ctx, debug=False):
 
     # 3b. Coverage collection (used only for
     # rl_algo="coverage_round_robin"). Every cycle is a seeded random
-    # permutation of all 72 actions. The schedule advances only after a valid,
+    # permutation of all 96 actions. The schedule advances only after a valid,
     # contiguous transition is saved, so a failed action application is retried.
     coverage_config = {
         'coverage_seed': 0,

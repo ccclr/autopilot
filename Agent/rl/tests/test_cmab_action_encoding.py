@@ -60,7 +60,7 @@ class CMABActionEncodingTests(unittest.TestCase):
             np.asarray([0.25, 0.75, 0, 1], dtype=np.float64),
         )
 
-    def test_current_catalog_produces_72_one_hot_features(self) -> None:
+    def test_current_catalog_produces_96_one_hot_features(self) -> None:
         catalog = ArmCatalog(codec=ActionCodec(policy="rf_ts"))
         arms = catalog.list_arms()
         policy = CMABPolicy(
@@ -71,10 +71,16 @@ class CMABActionEncodingTests(unittest.TestCase):
 
         encoded = policy._arm_to_vector(arms[40])
 
-        self.assertEqual(len(arms), 72)
-        self.assertEqual(encoded.shape, (72,))
+        self.assertEqual(len(arms), 96)
+        self.assertEqual(encoded.shape, (96,))
         self.assertEqual(float(encoded.sum()), 1.0)
         self.assertEqual(float(encoded[40]), 1.0)
+
+    def test_current_catalog_includes_200ms_timeout(self) -> None:
+        catalog = ArmCatalog(codec=ActionCodec(policy="rf_ts"))
+
+        self.assertEqual(catalog.timeout_values, (0, 100, 200, 300))
+        self.assertEqual(len(catalog.list_arms()), 96)
 
     def test_recent_arm_matching_supports_one_hot_features(self) -> None:
         policy = self._policy("one_hot")

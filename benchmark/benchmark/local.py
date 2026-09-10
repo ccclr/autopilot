@@ -255,6 +255,14 @@ class LocalBench:
                         getattr(self.bench_parameters, 'cmab_seed', 0)
                         if rl_algo == 'cmab' else None
                     ),
+                    enable_cmab_pairwise_residual_rf=(
+                        getattr(
+                            self.bench_parameters,
+                            'enable_cmab_pairwise_residual_rf',
+                            False,
+                        )
+                        if rl_algo == 'cmab' else False
+                    ),
                     warmup_iterations=warmup_iterations,
                     max_training_iterations=max_training_iterations,
                     kernel_ucb_alpha=getattr(
