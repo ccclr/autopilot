@@ -241,7 +241,7 @@ def remote(ctx, debug=False):
         'rate': [40_000],
         'tx_size': 512,
         # Standard CMAB data-collection run in the static A environment.
-        'duration': 1800,
+        'duration': 600,
         'runs': 1,
         # True: create a timestamped txt file for every run instead of
         # appending to an existing result file.
@@ -270,9 +270,8 @@ def remote(ctx, debug=False):
         # One switch for the 8-epoch structured start, protocol filters, and
         # incumbent/candidate confirmation used by rule-guided CMAB.
         'enable_cmab_protocol_rules': False,
-        # Keep disabled for the new 96-arm / pairwise-residual-RF experiments.
-        # Set True only for a deliberately planned offline-data collection run.
-        'enable_cmab_transition_export': False,
+        # Export this run's contiguous CMAB transitions for later training.
+        'enable_cmab_transition_export': True,
         'cmab_transition_export_dir': '/local/autopilot_offline_data',
         # Change this to B/C before collecting those environments.
         'cmab_environment_label': 'A',
