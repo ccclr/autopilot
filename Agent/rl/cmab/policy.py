@@ -11,6 +11,7 @@ class CMABPolicy:
     ACTION_ENCODINGS = ("numeric", "one_hot")
     PAIRWISE_RESIDUAL_KEYS = ("cut_condition_type", "fast_path_timeout")
     PAIRWISE_FEATURE_SCHEMA = "state_plus_cut_condition_type_fast_path_timeout_v2"
+    PAIRWISE_TARGET_SCHEMA = "current_global_training_residual_v1"
 
     def __init__(
         self,
@@ -81,6 +82,7 @@ class CMABPolicy:
         self._y = []
         self._pair_X = []
         self._pair_y = []
+        self._pair_start_index = 0
         self._pair_rf_is_fitted = False
         
         self.arm_counts = {arm: 0 for arm in arms}
@@ -379,28 +381,10 @@ class CMABPolicy:
                 continue
             feature_row = self._feature_row(context, arm)
             if self.enable_pairwise_residual_rf:
-                # Pre-update residual: the fitted global RF has not seen this
-                # newly arrived sample. At cold start there is no prediction,
-                # so use a zero residual instead of counting reward twice.
-                if self._is_fitted:
-                    global_prediction = float(
-                        self._rf.predict(np.asarray([feature_row]))[0]
-                    )
-                    pair_residual = float(reward) - global_prediction
-                else:
-                    global_prediction = float(reward)
-                    pair_residual = 0.0
+                # Store the raw pairwise feature only. Residual targets are
+                # regenerated after every Global RF fit so they always match
+                # the current Global RF instead of a mixture of old models.
                 self._pair_X.append(self._pair_feature_row(context, arm))
-                self._pair_y.append(pair_residual)
-                logger.info(
-                    "PAIRWISE_RESIDUAL_SAMPLE idx=%d pair=%s target=%.6f "
-                    "reward=%.6f preupdate_global=%.6f",
-                    len(self._pair_y),
-                    "x".join(self.PAIRWISE_RESIDUAL_KEYS),
-                    pair_residual,
-                    float(reward),
-                    global_prediction,
-                )
             self._X.append(feature_row)
             self._y.append(float(reward))
             self.arm_counts[arm] += 1
@@ -441,14 +425,26 @@ class CMABPolicy:
 
             self._rf.fit(training_X, training_y)
             self._is_fitted = True
+            global_predictions = self._rf.predict(X)
 
             if (
                 self.enable_pairwise_residual_rf
                 and self._pair_rf is not None
-                and self._pair_y
+                and self._pair_X
             ):
                 pair_X = np.asarray(self._pair_X)
-                pair_y = np.asarray(self._pair_y)
+                pair_global_X = X[self._pair_start_index:]
+                pair_base_y = y[self._pair_start_index:]
+                if len(pair_X) != len(pair_base_y):
+                    raise ValueError(
+                        "Pairwise feature history is not aligned with Global RF "
+                        f"training history: pair={len(pair_X)} "
+                        f"global_since_pair_start={len(pair_base_y)}"
+                    )
+                # Recompute every stored target against the newly fitted Global
+                # RF. Only the replay suffix is used for Pairwise RF training.
+                pair_y = pair_base_y - self._rf.predict(pair_global_X)
+                self._pair_y = pair_y.astype(float).tolist()
                 pair_replay_length = min(len(pair_y), self._replay_window)
                 pair_bootstrapped_idx = self._bootstrap_indices(
                     pair_replay_length,
@@ -459,21 +455,30 @@ class CMABPolicy:
                 pair_training_y = pair_y[-pair_replay_length:][pair_bootstrapped_idx]
                 self._pair_rf.fit(pair_training_X, pair_training_y)
                 self._pair_rf_is_fitted = True
+                pair_window_X = pair_X[-pair_replay_length:]
+                pair_window_y = pair_y[-pair_replay_length:]
                 pair_mse = float(
-                    np.mean((self._pair_rf.predict(pair_X) - pair_y) ** 2)
+                    np.mean(
+                        (self._pair_rf.predict(pair_window_X) - pair_window_y) ** 2
+                    )
                 )
                 logger.info(
                     "PAIRWISE_RESIDUAL_RF_UPDATED samples=%d replay=%d "
-                    "bootstrap=%d feature_dim=%d schema=%s mse=%.6f",
+                    "bootstrap=%d feature_dim=%d feature_schema=%s "
+                    "target_schema=%s residual_mean=%.6f "
+                    "residual_abs_mean=%.6f mse=%.6f",
                     len(pair_y),
                     pair_replay_length,
                     len(pair_bootstrapped_idx),
                     int(pair_X.shape[1]),
                     self.PAIRWISE_FEATURE_SCHEMA,
+                    self.PAIRWISE_TARGET_SCHEMA,
+                    float(np.mean(pair_window_y)),
+                    float(np.mean(np.abs(pair_window_y))),
                     pair_mse,
                 )
 
-            mse = np.mean((self._rf.predict(X) - y)**2)
+            mse = np.mean((global_predictions - y)**2)
             logger.info(
                 "RF Updated: samples=%d, replay=%d, bootstrap=%d, MSE=%.6f",
                 len(y), replay_length, len(bootstrapped_idx), mse
@@ -491,9 +496,11 @@ class CMABPolicy:
             'arms': list(self._arms),
             'enable_pairwise_residual_rf': self.enable_pairwise_residual_rf,
             'pair_feature_schema': self.PAIRWISE_FEATURE_SCHEMA,
+            'pair_target_schema': self.PAIRWISE_TARGET_SCHEMA,
             'pair_rf': self._pair_rf,
             'pair_X': self._pair_X,
             'pair_y': self._pair_y,
+            'pair_start_index': self._pair_start_index,
             'pair_rf_is_fitted': self._pair_rf_is_fitted,
         }, path)
 
@@ -531,11 +538,24 @@ class CMABPolicy:
                     "Old cut+timeout checkpoints cannot initialize the "
                     "state+cut+timeout pairwise RF."
                 )
+            checkpoint_target_schema = data.get('pair_target_schema')
+            if checkpoint_target_schema != self.PAIRWISE_TARGET_SCHEMA:
+                raise ValueError(
+                    "CMAB pairwise checkpoint target schema mismatch: "
+                    f"checkpoint={checkpoint_target_schema!r}, "
+                    f"configured={self.PAIRWISE_TARGET_SCHEMA!r}. "
+                    "Checkpoints containing pre-update residual targets cannot "
+                    "initialize the current-Global-RF residual model."
+                )
             self._pair_rf = data['pair_rf']
             self._pair_X = data.get('pair_X', [])
             self._pair_y = data.get('pair_y', [])
+            self._pair_start_index = int(
+                data.get('pair_start_index', len(self._y) - len(self._pair_X))
+            )
             self._pair_rf_is_fitted = data.get('pair_rf_is_fitted', False)
         elif self.enable_pairwise_residual_rf:
+            self._pair_start_index = len(self._y)
             logger.info(
                 "Loaded global-only CMAB checkpoint; pairwise residual RF "
                 "will start from the next valid sample"

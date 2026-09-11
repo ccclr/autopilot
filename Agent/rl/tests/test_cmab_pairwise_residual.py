@@ -80,16 +80,17 @@ class CMABPairwiseResidualTests(unittest.TestCase):
         self.assertEqual(policy._pair_y, [0.0])
         self.assertTrue(policy._pair_rf_is_fitted)
 
-    def test_new_residual_uses_global_model_before_update(self) -> None:
+    def test_all_residuals_are_recomputed_from_current_global_model(self) -> None:
         policy = self._policy(True)
         context = [0.2, 0.4]
         policy.update([ARMS[0]], [1.25], contexts=[context])
-        feature = policy._feature_row(context, ARMS[1])
-        expected = 2.0 - float(policy._rf.predict([feature])[0])
-
         policy.update([ARMS[1]], [2.0], contexts=[context])
 
-        self.assertAlmostEqual(policy._pair_y[-1], expected)
+        expected = np.asarray(policy._y) - policy._rf.predict(
+            np.asarray(policy._X)
+        )
+        np.testing.assert_allclose(policy._pair_y, expected)
+        self.assertEqual(len(policy._pair_y), len(policy._y))
 
     def test_optional_pair_model_does_not_change_global_rf(self) -> None:
         global_only = self._policy(False)
@@ -131,7 +132,7 @@ class CMABPairwiseResidualTests(unittest.TestCase):
             target.load(checkpoint)
 
             self.assertTrue(target._pair_rf_is_fitted)
-            self.assertEqual(target._pair_y, [0.0])
+            np.testing.assert_allclose(target._pair_y, source._pair_y)
 
     def test_old_pairwise_checkpoint_is_rejected(self) -> None:
         source = self._policy(True)
@@ -149,6 +150,41 @@ class CMABPairwiseResidualTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "feature schema mismatch"):
                 self._policy(True).load(checkpoint)
+
+    def test_old_residual_target_checkpoint_is_rejected(self) -> None:
+        source = self._policy(True)
+        source.update([ARMS[0]], [1.25], contexts=[[0.2] * 5])
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "cmab_pair_old_target.pkl"
+            source.save(checkpoint)
+
+            import joblib
+
+            data = joblib.load(checkpoint)
+            data.pop("pair_target_schema")
+            joblib.dump(data, checkpoint)
+
+            with self.assertRaisesRegex(ValueError, "target schema mismatch"):
+                self._policy(True).load(checkpoint)
+
+    def test_pairwise_model_can_start_from_global_only_checkpoint(self) -> None:
+        source = self._policy(False)
+        source.update([ARMS[0]], [1.25], contexts=[[0.2, 0.4]])
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "cmab_global_only.pkl"
+            source.save(checkpoint)
+            target = self._policy(True)
+
+            target.load(checkpoint)
+            target.update([ARMS[1]], [2.0], contexts=[[0.3, 0.5]])
+
+            self.assertEqual(target._pair_start_index, 1)
+            self.assertEqual(len(target._pair_X), 1)
+            self.assertEqual(len(target._pair_y), 1)
+            expected = 2.0 - float(
+                target._rf.predict([target._X[-1]])[0]
+            )
+            self.assertAlmostEqual(target._pair_y[0], expected)
 
 
 if __name__ == "__main__":

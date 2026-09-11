@@ -131,6 +131,11 @@ def main():
                         if args.enable_pairwise_residual_rf
                         else None
                     ),
+                    "pairwise_target_schema": (
+                        CMABPolicy.PAIRWISE_TARGET_SCHEMA
+                        if args.enable_pairwise_residual_rf
+                        else None
+                    ),
                 },
             )
             logger.info(
