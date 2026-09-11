@@ -1,9 +1,17 @@
 from fabric import Connection
-from autopilot.simulate_latency.latency_config import NODES
+from pathlib import Path
+
+try:
+    # Package execution: python -m autopilot.simulate_latency.deploy_latency
+    from .latency_config import NODES
+except ImportError:
+    # Direct execution: python deploy_latency.py
+    from latency_config import NODES
 
 
 USER = "AlanXiao"
 KEY_FILENAME = "/users/AlanXiao/.ssh/cloudlab"
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def deploy(node):
@@ -17,11 +25,11 @@ def deploy(node):
     )
 
 
-    script=f"{node}_tc.sh"
+    script = SCRIPT_DIR / f"{node}_tc.sh"
 
 
     conn.put(
-        script,
+        str(script),
         "/tmp/tc_latency.sh"
     )
 
@@ -42,5 +50,10 @@ def deploy(node):
 
 
 
-for node in NODES:
-    deploy(node)
+def main():
+    for node in NODES:
+        deploy(node)
+
+
+if __name__ == "__main__":
+    main()

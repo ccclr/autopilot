@@ -11,24 +11,24 @@ LATENCY = {
     "node0": {
         "node1": 25,
         "node2": 40,
-        "node3": 40,
+        "node3": 35,
     },
 
     "node1": {
         "node0": 25,
         "node2": 40,
-        "node3": 40,
+        "node3": 50,
     },
 
     "node2": {
         "node0": 40,
         "node1": 40,
-        "node3": 25,
+        "node3": 20,
     },
 
     "node3": {
-        "node0": 40,
-        "node1": 40,
-        "node2": 25,
+        "node0": 35,
+        "node1": 50,
+        "node2": 20,
     },
 }
