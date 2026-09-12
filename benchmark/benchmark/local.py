@@ -222,16 +222,11 @@ class LocalBench:
             agent_python = CommandMaker.agent_venv_python()
             resume_from = getattr(self.bench_parameters, 'cmab_resume_from', None)
             rl_algo = getattr(self.bench_parameters, 'rl_algo', 'cmab')
-            cmab_action_encoding = getattr(
-                self.bench_parameters, 'cmab_action_encoding', 'numeric'
-            )
             warmup_iterations = getattr(self.bench_parameters, 'rl_warmup_iterations', 5)
             max_training_iterations = getattr(
                 self.bench_parameters, 'rl_max_training_iterations', 200
             )
             Print.info(f'RL algo: {rl_algo}')
-            if rl_algo == 'cmab':
-                Print.info(f'CMAB action encoding: {cmab_action_encoding}')
             Print.info(f'RL warmup iterations: {warmup_iterations}')
             Print.info(
                 'RL max training iterations: '
@@ -248,9 +243,6 @@ class LocalBench:
                     python_bin=agent_python,
                     resume_from=resume_from,
                     rl_algo=rl_algo,
-                    cmab_action_encoding=(
-                        cmab_action_encoding if rl_algo == 'cmab' else None
-                    ),
                     cmab_seed=(
                         getattr(self.bench_parameters, 'cmab_seed', 0)
                         if rl_algo == 'cmab' else None

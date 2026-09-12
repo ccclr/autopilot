@@ -826,9 +826,6 @@ class CloudLabBench:
         if enable_rl:
             Print.info('Starting RL controllers...')
             rl_algo = getattr(bench_parameters, 'rl_algo', 'cmab')
-            cmab_action_encoding = getattr(
-                bench_parameters, 'cmab_action_encoding', 'numeric'
-            )
             centralized_action_policy = rl_algo in (
                 'dqn',
                 'coverage_round_robin',
@@ -867,9 +864,6 @@ class CloudLabBench:
                 # every controller node and is not copied by Fabric.
                 resume_from = getattr(bench_parameters, 'cmab_resume_from', None)
             warmup_iterations = getattr(bench_parameters, 'rl_warmup_iterations', 5)
-            enable_cmab_protocol_rules = bool(
-                getattr(bench_parameters, 'enable_cmab_protocol_rules', False)
-            )
             enable_cmab_pairwise_residual_rf = bool(
                 getattr(
                     bench_parameters,
@@ -913,10 +907,6 @@ class CloudLabBench:
                 for i, address in enumerate(primary_addresses)
             )
             Print.info(f'RL algo: {rl_algo}')
-            if rl_algo == 'cmab':
-                Print.info(
-                    f'CMAB action encoding: {cmab_action_encoding}'
-                )
             Print.info(f'RL warmup iterations: {warmup_iterations}')
             Print.info(
                 'RL max training iterations: '
@@ -924,10 +914,6 @@ class CloudLabBench:
             )
             Print.info(f'RL checkpoint enabled: {enable_checkpoint}')
             if rl_algo == 'cmab':
-                Print.info(
-                    'CMAB protocol rules enabled: '
-                    f'{enable_cmab_protocol_rules}'
-                )
                 Print.info(
                     'CMAB pairwise residual RF enabled: '
                     f'{enable_cmab_pairwise_residual_rf}'
@@ -1025,9 +1011,6 @@ class CloudLabBench:
                     python_bin=CommandMaker.agent_venv_python(),
                     resume_from=resume_from,
                     rl_algo=rl_algo,
-                    cmab_action_encoding=(
-                        cmab_action_encoding if rl_algo == 'cmab' else None
-                    ),
                     cmab_seed=(
                         getattr(bench_parameters, 'cmab_seed', 0)
                         if rl_algo == 'cmab' else None
@@ -1090,9 +1073,6 @@ class CloudLabBench:
                         getattr(bench_parameters, 'coverage_seed', 0)
                         if rl_algo == 'coverage_round_robin'
                         else None
-                    ),
-                    enable_cmab_protocol_rules=(
-                        enable_cmab_protocol_rules if rl_algo == 'cmab' else False
                     ),
                     enable_cmab_pairwise_residual_rf=(
                         enable_cmab_pairwise_residual_rf

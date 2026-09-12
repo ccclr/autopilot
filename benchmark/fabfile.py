@@ -46,9 +46,6 @@ def local(ctx, debug=False):
         # RL algorithm: "cmab", "gp_bo", continuous-timeout "kernel_ucb",
         # centralized "dqn", or data-only "coverage_round_robin".
         'rl_algo': 'cmab',
-        # CMAB-RF only: "numeric" preserves the legacy raw parameter vector;
-        # "one_hot" assigns one indicator feature to each complete arm.
-        'cmab_action_encoding': 'numeric',
         # Controls the CMAB random forest random_state. It does not replace
         # the per-epoch shared seed derived from the live protocol state.
         'cmab_seed': 0,
@@ -255,11 +252,8 @@ def remote(ctx, debug=False):
         # Supported values: "cmab", "gp_bo", "kernel_ucb", "dqn", and
         # "coverage_round_robin". The default remains CMAB.
         'rl_algo': 'cmab',
-        # CMAB-RF action representation. Use "numeric" for the existing
-        # baseline and "one_hot" for the encoding comparison experiment.
-        'cmab_action_encoding': 'numeric',
-        # Keep this value paired between numeric and one_hot runs. Change it
-        # between repetitions to measure sensitivity to RF initialization.
+        # Change this value between repetitions to measure sensitivity to RF
+        # initialization.
         'cmab_seed': 0,
         # Set True to enable the optional pairwise residual RF. The standard
         # Global-RF-only CMAB path remains available when this is False.
@@ -267,9 +261,6 @@ def remote(ctx, debug=False):
         'rl_warmup_iterations': 0,
         # None means training continues until the experiment ends.
         'rl_max_training_iterations': None,
-        # One switch for the 8-epoch structured start, protocol filters, and
-        # incumbent/candidate confirmation used by rule-guided CMAB.
-        'enable_cmab_protocol_rules': False,
         # Export this run's contiguous CMAB transitions for later training.
         'enable_cmab_transition_export': True,
         'cmab_transition_export_dir': '/local/autopilot_offline_data',

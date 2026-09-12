@@ -37,16 +37,6 @@ def main():
     )
     parser.add_argument("--checkpoint-freq", type=int, default=10)
     parser.add_argument("--policy", type=str, default="rf_ts", choices=["rf_ts", "random", "default"])
-    parser.add_argument(
-        "--action-encoding",
-        type=str,
-        default="numeric",
-        choices=CMABPolicy.ACTION_ENCODINGS,
-        help=(
-            "CMAB-RF action features: legacy raw numeric parameters or one "
-            "indicator per complete arm"
-        ),
-    )
     parser.add_argument("--context-mode", type=str, default="dynamic", choices=["dynamic", "full"])
     parser.add_argument("--epsilon", type=float, default=0, help="Epsilon-greedy exploration rate")
     parser.add_argument(
@@ -68,11 +58,6 @@ def main():
         default=5,
         help="Skip policy updates for the first N iterations (CMAB trainer warmup).",
     )
-    parser.add_argument(
-        "--enable-protocol-rules",
-        action="store_true",
-        help="Enable structured initialization and Autobahn-aware CMAB filters.",
-    )
     parser.add_argument("--transition-export-dir", type=str, default=None)
     parser.add_argument("--environment-label", type=str, default="unlabeled")
     parser.add_argument("--run-id", type=str, default=None)
@@ -82,13 +67,11 @@ def main():
     logger.info("Starting Autopilot Continuous CMAB Training")
     logger.info(
         "metrics_dir=%s parameters_file=%s warmup=%d max_iterations=%s "
-        "protocol_rules=%s action_encoding=%s pairwise_residual_rf=%s",
+        "pairwise_residual_rf=%s",
         args.metrics_dir,
         args.parameters_file,
         warmup_iterations,
         args.num_iterations,
-        args.enable_protocol_rules,
-        args.action_encoding,
         args.enable_pairwise_residual_rf,
     )
 
@@ -102,7 +85,6 @@ def main():
         policy_name=args.policy,
         epsilon=args.epsilon,
         random_state=args.seed,
-        action_encoding=args.action_encoding,
         enable_pairwise_residual_rf=args.enable_pairwise_residual_rf,
     )
     if args.resume_from:
@@ -122,9 +104,7 @@ def main():
                 metadata={
                     "policy": args.policy,
                     "seed": args.seed,
-                    "protocol_rules": args.enable_protocol_rules,
                     "warmup_iterations": warmup_iterations,
-                    "action_encoding": args.action_encoding,
                     "pairwise_residual_rf": args.enable_pairwise_residual_rf,
                     "pairwise_feature_schema": (
                         CMABPolicy.PAIRWISE_FEATURE_SCHEMA
@@ -160,7 +140,6 @@ def main():
         metrics_timeout=args.metrics_timeout,
         node_index=args.node_index,
         warmup_iterations=warmup_iterations,
-        enable_protocol_rules=args.enable_protocol_rules,
         transition_writer=transition_writer,
     )
 

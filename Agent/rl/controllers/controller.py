@@ -131,11 +131,9 @@ class AutopilotController:
         dqn_checkpoint_load_mode: str = "resume",
         coverage_seed: int = 0,
         cmab_seed: int = 0,
-        enable_cmab_protocol_rules: bool = False,
         cmab_transition_export_dir: Optional[str] = None,
         cmab_environment_label: str = "unlabeled",
         cmab_transition_run_id: Optional[str] = None,
-        cmab_action_encoding: str = "numeric",
         enable_cmab_pairwise_residual_rf: bool = False,
     ):
         """
@@ -162,11 +160,6 @@ class AutopilotController:
         self.log_dir = Path(log_dir)
         self.resume_from = resume_from
         self.rl_algo = (rl_algo or "cmab").lower()
-        self.cmab_action_encoding = str(cmab_action_encoding).lower()
-        if self.cmab_action_encoding not in ("numeric", "one_hot"):
-            raise ValueError(
-                "CMAB action encoding must be 'numeric' or 'one_hot'"
-            )
         self.enable_cmab_pairwise_residual_rf = bool(
             enable_cmab_pairwise_residual_rf
         )
@@ -216,7 +209,6 @@ class AutopilotController:
                 "DQN checkpoint load mode must be 'resume' or 'finetune'"
             )
         self.dqn_checkpoint_load_mode = dqn_checkpoint_load_mode
-        self.enable_cmab_protocol_rules = bool(enable_cmab_protocol_rules)
         self.cmab_transition_export_dir = cmab_transition_export_dir
         self.cmab_environment_label = cmab_environment_label or "unlabeled"
         self.cmab_transition_run_id = cmab_transition_run_id
@@ -309,10 +301,6 @@ class AutopilotController:
             # The common trainer interface accepts this argument, but coverage
             # collection has no model/checkpoint state and creates no folder.
             return self.metrics_dir.parent
-        if self.rl_algo == "cmab" and self.cmab_action_encoding == "one_hot":
-            # Keep experimental one-hot checkpoints away from legacy numeric
-            # checkpoints while preserving the original numeric path.
-            return home / "checkpoints" / "cmab_one_hot"
         return home / "checkpoints"
 
     def _start_continuous_training_subprocess(self):
@@ -344,8 +332,6 @@ class AutopilotController:
                 cmd.extend(
                     ["--num-iterations", str(self.max_training_iterations)]
                 )
-            if self.rl_algo == "cmab" and self.enable_cmab_protocol_rules:
-                cmd.append("--enable-protocol-rules")
             if (
                 self.rl_algo == "cmab"
                 and self.enable_cmab_pairwise_residual_rf
@@ -354,7 +340,6 @@ class AutopilotController:
             if self.rl_algo == "cmab":
                 cmd.extend(
                     [
-                        "--action-encoding", str(self.cmab_action_encoding),
                         "--seed", str(self.cmab_seed),
                     ]
                 )
@@ -538,12 +523,6 @@ def main():
                        help=('RL algorithm: cmab, gp_bo, continuous kernel_ucb, '
                              'centralized dqn, or coverage_round_robin'))
     parser.add_argument(
-        '--cmab-action-encoding',
-        choices=['numeric', 'one_hot'],
-        default='numeric',
-        help='CMAB-RF action feature encoding (default: numeric)',
-    )
-    parser.add_argument(
         '--cmab-seed',
         type=int,
         default=0,
@@ -606,11 +585,6 @@ def main():
         choices=['resume', 'finetune'],
         default='resume',
     )
-    parser.add_argument(
-        '--enable-cmab-protocol-rules',
-        action='store_true',
-        help='Enable structured, protocol-aware CMAB exploration',
-    )
     parser.add_argument('--cmab-transition-export-dir', type=str, default=None)
     parser.add_argument('--cmab-environment-label', type=str, default='unlabeled')
     parser.add_argument('--cmab-transition-run-id', type=str, default=None)
@@ -623,7 +597,6 @@ def main():
     print(f"🏷️  Node index: {args.node_index}")
     print(f"📝 Log dir: {args.log_dir}")
     print(f"🧠 RL algo: {args.rl_algo}")
-    print(f"🔢 CMAB action encoding: {args.cmab_action_encoding}")
     print(f"🎲 CMAB random-forest seed: {args.cmab_seed}")
     print(f"🧩 CMAB pairwise residual RF: {args.enable_cmab_pairwise_residual_rf}")
     print(f"🔁 Resume from: {args.resume_from}")
@@ -634,7 +607,6 @@ def main():
         else 'continuous'
     )
     print(f"🔢 Max training iterations: {max_iterations}")
-    print(f"🧭 CMAB protocol rules: {args.enable_cmab_protocol_rules}")
     print(f"💾 CMAB transition export: {args.cmab_transition_export_dir}")
     print(f"🌐 CMAB environment label: {args.cmab_environment_label}")
     print(f"🧪 DQN checkpoint load mode: {args.dqn_checkpoint_load_mode}")
@@ -651,7 +623,6 @@ def main():
             log_dir=args.log_dir,
             resume_from=args.resume_from,
             rl_algo=args.rl_algo,
-            cmab_action_encoding=args.cmab_action_encoding,
             cmab_seed=args.cmab_seed,
             enable_cmab_pairwise_residual_rf=(
                 args.enable_cmab_pairwise_residual_rf
@@ -683,7 +654,6 @@ def main():
             dqn_seed=args.dqn_seed,
             dqn_checkpoint_load_mode=args.dqn_checkpoint_load_mode,
             coverage_seed=args.coverage_seed,
-            enable_cmab_protocol_rules=args.enable_cmab_protocol_rules,
             cmab_transition_export_dir=args.cmab_transition_export_dir,
             cmab_environment_label=args.cmab_environment_label,
             cmab_transition_run_id=args.cmab_transition_run_id,

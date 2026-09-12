@@ -8,7 +8,6 @@ from sklearn.ensemble import RandomForestRegressor
 logger = logging.getLogger(__name__)
 
 class CMABPolicy:
-    ACTION_ENCODINGS = ("numeric", "one_hot")
     PAIRWISE_RESIDUAL_KEYS = ("cut_condition_type", "fast_path_timeout")
     PAIRWISE_FEATURE_SCHEMA = "state_plus_cut_condition_type_fast_path_timeout_v2"
     PAIRWISE_TARGET_SCHEMA = "current_global_training_residual_v1"
@@ -27,22 +26,11 @@ class CMABPolicy:
         epsilon_decay: float = 0.99,
         min_epsilon: float = 0,
         replay_window: int = 200,
-        action_encoding: str = "numeric",
         enable_pairwise_residual_rf: bool = False,
     ):
         self._arms = list(arms)
         if len(set(self._arms)) != len(self._arms):
             raise ValueError("CMAB arms must be unique")
-        action_encoding = str(action_encoding).lower()
-        if action_encoding not in self.ACTION_ENCODINGS:
-            raise ValueError(
-                "CMAB action encoding must be one of "
-                f"{self.ACTION_ENCODINGS}, got {action_encoding!r}"
-            )
-        self.action_encoding = action_encoding
-        self._arm_indices = {
-            arm: index for index, arm in enumerate(self._arms)
-        }
         self.policy_name = policy_name
         self.epsilon = epsilon
         self._min_samples_to_fit = min_samples_to_fit
@@ -142,16 +130,6 @@ class CMABPolicy:
         return rng.choice(replay_length, replay_length, replace=True)
 
     def _arm_to_vector(self, arm) -> np.ndarray:
-        if self.action_encoding == "one_hot":
-            try:
-                arm_index = self._arm_indices[arm]
-            except (KeyError, TypeError) as error:
-                raise ValueError(
-                    f"Unknown CMAB arm for one-hot encoding: {arm!r}"
-                ) from error
-            encoded = np.zeros(len(self._arms), dtype=np.float32)
-            encoded[arm_index] = 1.0
-            return encoded
         if isinstance(arm, str) and "=" in arm:
             values = []
             for part in arm.split(","):
@@ -492,7 +470,6 @@ class CMABPolicy:
             'y': self._y,
             'is_fitted': self._is_fitted,
             'update_count': self._update_count,
-            'action_encoding': self.action_encoding,
             'arms': list(self._arms),
             'enable_pairwise_residual_rf': self.enable_pairwise_residual_rf,
             'pair_feature_schema': self.PAIRWISE_FEATURE_SCHEMA,
@@ -507,14 +484,6 @@ class CMABPolicy:
     def load(self, path):
         import joblib
         data = joblib.load(path)
-        # Checkpoints written before action encoding was configurable used the
-        # legacy numeric representation.
-        checkpoint_encoding = data.get('action_encoding', 'numeric')
-        if checkpoint_encoding != self.action_encoding:
-            raise ValueError(
-                "CMAB checkpoint action encoding mismatch: "
-                f"checkpoint={checkpoint_encoding}, configured={self.action_encoding}"
-            )
         checkpoint_arms = data.get('arms')
         if (
             checkpoint_arms is not None

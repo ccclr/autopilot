@@ -551,16 +551,11 @@ class Bench:
         Print.info('Starting RL controllers...')
         resume_from = getattr(bench_parameters, 'cmab_resume_from', None)
         rl_algo = getattr(bench_parameters, 'rl_algo', 'cmab')
-        cmab_action_encoding = getattr(
-            bench_parameters, 'cmab_action_encoding', 'numeric'
-        )
         warmup_iterations = getattr(bench_parameters, 'rl_warmup_iterations', 5)
         max_training_iterations = getattr(
             bench_parameters, 'rl_max_training_iterations', 200
         )
         Print.info(f'RL algo: {rl_algo}')
-        if rl_algo == 'cmab':
-            Print.info(f'CMAB action encoding: {cmab_action_encoding}')
         Print.info(f'RL warmup iterations: {warmup_iterations}')
         Print.info(
             'RL max training iterations: '
@@ -578,9 +573,6 @@ class Bench:
                 python_bin=CommandMaker.agent_venv_python(),
                 resume_from=resume_from,
                 rl_algo=rl_algo,
-                cmab_action_encoding=(
-                    cmab_action_encoding if rl_algo == 'cmab' else None
-                ),
                 cmab_seed=(
                     getattr(bench_parameters, 'cmab_seed', 0)
                     if rl_algo == 'cmab' else None

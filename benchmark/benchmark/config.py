@@ -329,17 +329,6 @@ class BenchParameters:
                     '"dqn", or "coverage_round_robin"'
                 )
             self.rl_algo = rl_algo.lower()
-            cmab_action_encoding = json.get(
-                'cmab_action_encoding', 'numeric'
-            )
-            if (
-                not isinstance(cmab_action_encoding, str)
-                or cmab_action_encoding.lower() not in ('numeric', 'one_hot')
-            ):
-                raise ConfigError(
-                    'cmab_action_encoding must be "numeric" or "one_hot"'
-                )
-            self.cmab_action_encoding = cmab_action_encoding.lower()
             enable_cmab_pairwise_residual_rf = json.get(
                 'enable_cmab_pairwise_residual_rf', False
             )
@@ -368,15 +357,6 @@ class BenchParameters:
             if warmup < 0:
                 raise ConfigError('rl_warmup_iterations must be an integer >= 0')
             self.rl_warmup_iterations = warmup
-
-            enable_cmab_protocol_rules = json.get(
-                'enable_cmab_protocol_rules', False
-            )
-            if not isinstance(enable_cmab_protocol_rules, bool):
-                raise ConfigError(
-                    'enable_cmab_protocol_rules must be true or false'
-                )
-            self.enable_cmab_protocol_rules = enable_cmab_protocol_rules
 
             enable_cmab_transition_export = json.get(
                 'enable_cmab_transition_export', False

@@ -27,24 +27,12 @@ def _parameters(**overrides):
     return values
 
 
-class CMABActionEncodingConfigTests(TestCase):
-    def test_numeric_is_backward_compatible_default(self):
+class CMABConfigTests(TestCase):
+    def test_defaults_preserve_global_rf_configuration(self):
         parameters = BenchParameters(_parameters())
 
-        self.assertEqual(parameters.cmab_action_encoding, 'numeric')
         self.assertEqual(parameters.cmab_seed, 0)
         self.assertFalse(parameters.enable_cmab_pairwise_residual_rf)
-
-    def test_accepts_one_hot(self):
-        parameters = BenchParameters(
-            _parameters(cmab_action_encoding='one_hot')
-        )
-
-        self.assertEqual(parameters.cmab_action_encoding, 'one_hot')
-
-    def test_rejects_unknown_encoding(self):
-        with self.assertRaisesRegex(ConfigError, 'cmab_action_encoding'):
-            BenchParameters(_parameters(cmab_action_encoding='ordinal'))
 
     def test_accepts_non_negative_cmab_seed(self):
         parameters = BenchParameters(_parameters(cmab_seed=17))
@@ -70,19 +58,17 @@ class CMABActionEncodingConfigTests(TestCase):
                 _parameters(enable_cmab_pairwise_residual_rf='yes')
             )
 
-    def test_controller_command_contains_encoding(self):
+    def test_controller_command_contains_cmab_options(self):
         command = CommandMaker.run_controller(
             node_index=0,
             repo_name='autopilot',
             log_dir='/local/logs',
             parameters_file='/local/.parameters.json',
             rl_algo='cmab',
-            cmab_action_encoding='one_hot',
             cmab_seed=17,
             enable_cmab_pairwise_residual_rf=True,
         )
 
-        self.assertIn('--cmab-action-encoding one_hot', command)
         self.assertIn('--cmab-seed 17', command)
         self.assertIn('--enable-cmab-pairwise-residual-rf', command)
 

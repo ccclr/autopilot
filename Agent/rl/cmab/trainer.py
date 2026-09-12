@@ -7,7 +7,7 @@ import re
 import socket
 import time
 import hashlib
-from collections import defaultdict, deque
+from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,19 +17,6 @@ from .arm_catalog import ArmCatalog
 from .context_builder import ContextBuilder
 from actions.state_encode import build_dqn_state
 from offline_dataset import AsyncTransitionDatasetWriter
-from .protocol_rules import (
-    CANDIDATE_CONFIRMATIONS,
-    FPR_HIGH_THRESHOLD,
-    FPR_LOW_THRESHOLD,
-    LANE_HEALTHY_RATIO,
-    NO_IMPROVEMENT_EPOCHS,
-    PROTOCOL_METRIC_WINDOW,
-    REWARD_IMPROVEMENT_THRESHOLD,
-    REWARD_ROLLBACK_THRESHOLD,
-    STRUCTURED_INIT_EPOCHS,
-    allowed_cut_values,
-    allowed_timeout_values,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +34,6 @@ class CMABTrainer:
         node_index: Optional[int] = None,
         warmup_iterations: int = 5,
         checkpoint_prefix: str = "cmab_checkpoint",
-        enable_protocol_rules: bool = False,
         transition_writer: Optional[AsyncTransitionDatasetWriter] = None,
     ):
         self.metrics_dir = Path(metrics_dir)
@@ -66,30 +52,9 @@ class CMABTrainer:
         self.arm_counts = {}
         self._param_socket: Optional[socket.socket] = None
         self.node_index = node_index
-        self.enable_protocol_rules = bool(enable_protocol_rules)
-        self.warmup_iterations = (
-            0 if self.enable_protocol_rules else max(0, warmup_iterations)
-        )
+        self.warmup_iterations = max(0, warmup_iterations)
         self.checkpoint_prefix = checkpoint_prefix or "cmab_checkpoint"
         self.transition_writer = transition_writer
-
-        # Rule-guided CMAB state.  These fields are unused when the feature is
-        # disabled, leaving the original selection path unchanged.
-        self._structured_arms: list[str] = []
-        self._structured_index = 0
-        self._incumbent_arm: Optional[str] = None
-        self._incumbent_confirmation_remaining = 0
-        self._candidate_arm: Optional[str] = None
-        self._candidate_rewards: list[float] = []
-        self._candidate_baseline_reward: Optional[float] = None
-        self._arm_reward_history: dict[str, deque] = defaultdict(
-            lambda: deque(maxlen=max(PROTOCOL_METRIC_WINDOW, CANDIDATE_CONFIRMATIONS))
-        )
-        self._fpr_history: deque[float] = deque(maxlen=PROTOCOL_METRIC_WINDOW)
-        self._lane_history: deque[list[float]] = deque(maxlen=PROTOCOL_METRIC_WINDOW)
-        self._last_protocol_metrics_epoch: Optional[int] = None
-        self._epochs_without_improvement = 0
-        self._rules_converged = False
 
     def run(self, num_iterations: Optional[int], checkpoint_freq: int):
         logger.info("Initializing CMAB training loop...")
@@ -99,22 +64,6 @@ class CMABTrainer:
             "Warmup iterations (skip policy update): %s",
             self.warmup_iterations,
         )
-        logger.info("CMAB protocol rules enabled: %s", self.enable_protocol_rules)
-        if self.enable_protocol_rules:
-            logger.info(
-                "CMAB_RULES_CONFIG structured=%d metric_window=%d confirmations=%d "
-                "reward_improvement=%.2f rollback=%.2f fpr_low=%.2f "
-                "fpr_high=%.2f lane_ratio=%.2f no_improvement=%d",
-                STRUCTURED_INIT_EPOCHS,
-                PROTOCOL_METRIC_WINDOW,
-                CANDIDATE_CONFIRMATIONS,
-                REWARD_IMPROVEMENT_THRESHOLD,
-                REWARD_ROLLBACK_THRESHOLD,
-                FPR_LOW_THRESHOLD,
-                FPR_HIGH_THRESHOLD,
-                LANE_HEALTHY_RATIO,
-                NO_IMPROVEMENT_EPOCHS,
-            )
         self._connect_param_socket()
         self.last_metrics_file = self._get_latest_metrics_file()
         if self.last_metrics_file is None:
@@ -127,28 +76,6 @@ class CMABTrainer:
         last_arm = self._load_initial_arm_from_parameters_file()
         if last_arm is not None:
             logger.info("Bootstrapped initial arm from parameters file: %s", last_arm)
-        if self.enable_protocol_rules:
-            if last_arm is None or not self.arm_catalog.contains(last_arm):
-                last_arm = self.arm_catalog.list_arms()[0]
-                logger.warning(
-                    "Initial parameters are not a legal CMAB arm; using catalog arm: %s",
-                    last_arm,
-                )
-            self._structured_arms = self.arm_catalog.structured_initial_arms(last_arm)
-            logger.info(
-                "STRUCTURED_INIT_READY count=%d expected=%d base=%s arms=%s",
-                len(self._structured_arms),
-                STRUCTURED_INIT_EPOCHS,
-                last_arm,
-                self._structured_arms,
-            )
-            if len(self._structured_arms) != STRUCTURED_INIT_EPOCHS:
-                logger.warning(
-                    "Structured initialization contains %d arms instead of %d; "
-                    "continuing with the legal catalog values.",
-                    len(self._structured_arms),
-                    STRUCTURED_INIT_EPOCHS,
-                )
         action_by_epoch: dict[int, str] = {}
         while self.training_active:
             if num_iterations is not None and iteration >= num_iterations:
@@ -160,15 +87,7 @@ class CMABTrainer:
             logger.info("FEATURIZE_DONE context_dim=%d", len(context))
             current_epoch = self._get_epoch_from_metrics_file(self.last_metrics_file)
             shared_seed_hex = self._compute_shared_seed_hex(self.last_metrics_file)
-            decision_kind = "standard"
-            if self.enable_protocol_rules:
-                self._record_protocol_metrics(self.last_metrics_file)
-                arm, decision_kind = self._select_rule_guided_arm(
-                    context,
-                    shared_seed_hex,
-                )
-            else:
-                arm = self.policy.select_arm(context, shared_seed_hex=shared_seed_hex)
+            arm = self.policy.select_arm(context, shared_seed_hex=shared_seed_hex)
             params = self.arm_catalog.decode_arm(arm)
             self.arm_counts[arm] = self.arm_counts.get(arm, 0) + 1
             if current_epoch is not None:
@@ -248,13 +167,6 @@ class CMABTrainer:
                     reward,
                     use_arm,
                 )
-            if self.enable_protocol_rules:
-                self._handle_rule_guided_result(
-                    selected_arm=arm,
-                    credited_arm=use_arm,
-                    reward=reward,
-                    decision_kind=decision_kind,
-                )
             logger.info(
                 "Iteration %s : context=%s arm=%s params=%s",
                 iteration + 1,
@@ -293,7 +205,7 @@ class CMABTrainer:
 
             self.last_metrics_file = next_metrics
             # Export is deliberately last and fail-open: all CMAB state,
-            # checkpoint, and protocol-rule work for this iteration is complete.
+            # checkpoint work for this iteration is complete.
             self._export_transition_best_effort(
                 current_epoch=current_epoch,
                 reward_epoch=reward_epoch,
@@ -477,328 +389,6 @@ class CMABTrainer:
                 e,
             )
             return None
-
-    def _record_protocol_metrics(self, metrics_path: Path) -> None:
-        epoch = self._get_epoch_from_metrics_file(metrics_path)
-        if epoch is not None and epoch == self._last_protocol_metrics_epoch:
-            return
-
-        data = self._load_json_with_retry(metrics_path)
-        try:
-            fast_path_ratio = float(data.get("global_fast_path_ratio", 0.0))
-        except (TypeError, ValueError):
-            fast_path_ratio = 0.0
-
-        lane_values: list[float] = []
-        growth_rates = (
-            data.get("state_4_lane_vector", {})
-            .get("growth_rates", {})
-        )
-        if isinstance(growth_rates, dict):
-            for _, value in sorted(growth_rates.items()):
-                try:
-                    lane_values.append(float(value))
-                except (TypeError, ValueError):
-                    continue
-
-        self._fpr_history.append(fast_path_ratio)
-        if lane_values:
-            self._lane_history.append(lane_values)
-        self._last_protocol_metrics_epoch = epoch
-        logger.info(
-            "PROTOCOL_METRICS epoch=%s fpr=%.6f lanes=%s",
-            epoch,
-            fast_path_ratio,
-            lane_values,
-        )
-
-    def _mean_arm_reward(self, arm: str, limit: int) -> Optional[float]:
-        values = list(self._arm_reward_history.get(arm, ()))
-        if not values:
-            return None
-        recent = values[-max(1, int(limit)):]
-        return sum(recent) / len(recent)
-
-    def _choose_initial_incumbent(self) -> str:
-        ranked = []
-        for index, arm in enumerate(self._structured_arms):
-            mean_reward = self._mean_arm_reward(arm, limit=1)
-            if mean_reward is not None:
-                ranked.append((mean_reward, -index, arm))
-        if ranked:
-            _, _, incumbent = max(ranked)
-        else:
-            incumbent = self._structured_arms[0]
-
-        self._incumbent_arm = incumbent
-        self._incumbent_confirmation_remaining = CANDIDATE_CONFIRMATIONS
-        logger.info(
-            "INITIAL_INCUMBENT arm=%s observed_reward=%s confirmations=%d",
-            incumbent,
-            self._mean_arm_reward(incumbent, limit=1),
-            self._incumbent_confirmation_remaining,
-        )
-        return incumbent
-
-    def _select_rule_guided_arm(
-        self,
-        context: np.ndarray,
-        shared_seed_hex: str,
-    ) -> tuple[str, str]:
-        if self._structured_index < len(self._structured_arms):
-            arm = self._structured_arms[self._structured_index]
-            logger.info(
-                "STRUCTURED_INIT epoch=%d/%d arm=%s",
-                self._structured_index + 1,
-                len(self._structured_arms),
-                arm,
-            )
-            return arm, "structured"
-
-        if self._incumbent_arm is None:
-            self._choose_initial_incumbent()
-
-        if self._incumbent_confirmation_remaining > 0:
-            logger.info(
-                "INCUMBENT_CONFIRM arm=%s remaining=%d/%d",
-                self._incumbent_arm,
-                self._incumbent_confirmation_remaining,
-                CANDIDATE_CONFIRMATIONS,
-            )
-            return self._incumbent_arm, "incumbent_confirm"
-
-        if self._candidate_arm is not None:
-            logger.info(
-                "CANDIDATE_HOLD arm=%s collected=%d/%d",
-                self._candidate_arm,
-                len(self._candidate_rewards),
-                CANDIDATE_CONFIRMATIONS,
-            )
-            return self._candidate_arm, "candidate"
-
-        if self._rules_converged:
-            logger.info(
-                "RULE_GUIDED_EXPLOIT incumbent=%s reason=no_improvement",
-                self._incumbent_arm,
-            )
-            return self._incumbent_arm, "exploit"
-
-        neighbors = self.arm_catalog.one_parameter_neighbors(self._incumbent_arm)
-        incumbent_params = self.arm_catalog.decode_arm(self._incumbent_arm)
-        allowed_timeouts, mean_fpr = allowed_timeout_values(
-            incumbent_params["fast_path_timeout"],
-            list(self._fpr_history),
-            self.arm_catalog.timeout_values,
-        )
-        allowed_cuts, averaged_lanes, healthy_lanes = allowed_cut_values(
-            list(self._lane_history),
-            self.arm_catalog.cut_values,
-        )
-
-        current_timeout = incumbent_params["fast_path_timeout"]
-        current_cut = incumbent_params["cut_condition_type"]
-        filter_reason = "normal"
-        if current_timeout not in allowed_timeouts:
-            # Repair one protocol dimension at a time.  Timeout has priority
-            # because it directly controls the fast/slow-path wait.
-            filtered = [
-                arm
-                for arm in neighbors
-                if self.arm_catalog.decode_arm(arm)["fast_path_timeout"]
-                in allowed_timeouts
-            ]
-            filter_reason = "timeout_repair"
-        elif current_cut not in allowed_cuts:
-            filtered = [
-                arm
-                for arm in neighbors
-                if self.arm_catalog.decode_arm(arm)["cut_condition_type"]
-                in allowed_cuts
-            ]
-            filter_reason = "cut_repair"
-        else:
-            filtered = self.arm_catalog.filter_by_protocol_values(
-                neighbors,
-                timeout_values=allowed_timeouts,
-                cut_values=allowed_cuts,
-            )
-
-        logger.info(
-            "TIMEOUT_FILTER current=%d mean_fpr=%s allowed=%s",
-            current_timeout,
-            f"{mean_fpr:.6f}" if mean_fpr is not None else "n/a",
-            sorted(allowed_timeouts),
-        )
-        logger.info(
-            "CUT_FILTER current=%d averaged_lanes=%s healthy=%s allowed=%s",
-            current_cut,
-            averaged_lanes,
-            healthy_lanes,
-            sorted(allowed_cuts),
-        )
-        logger.info(
-            "NEIGHBOR_FILTER incumbent=%s total=%d remaining=%d reason=%s arms=%s",
-            self._incumbent_arm,
-            len(neighbors),
-            len(filtered),
-            filter_reason,
-            filtered,
-        )
-
-        if not filtered:
-            self._rules_converged = True
-            logger.info(
-                "CMAB_RULES_CONVERGED incumbent=%s reason=no_legal_neighbor",
-                self._incumbent_arm,
-            )
-            return self._incumbent_arm, "exploit"
-
-        candidate = self.policy.select_arm(
-            context,
-            shared_seed_hex=shared_seed_hex,
-            allowed_arms=filtered,
-        )
-        baseline = self._mean_arm_reward(
-            self._incumbent_arm,
-            limit=CANDIDATE_CONFIRMATIONS,
-        )
-        self._candidate_arm = candidate
-        self._candidate_rewards = []
-        self._candidate_baseline_reward = baseline
-        logger.info(
-            "CANDIDATE_START incumbent=%s candidate=%s baseline_reward=%s",
-            self._incumbent_arm,
-            candidate,
-            f"{baseline:.6f}" if baseline is not None else "n/a",
-        )
-        return candidate, "candidate"
-
-    def _clear_candidate(self) -> None:
-        self._candidate_arm = None
-        self._candidate_rewards = []
-        self._candidate_baseline_reward = None
-
-    def _handle_rule_guided_result(
-        self,
-        selected_arm: str,
-        credited_arm: str,
-        reward: float,
-        decision_kind: str,
-    ) -> None:
-        self._arm_reward_history[credited_arm].append(float(reward))
-
-        if credited_arm != selected_arm:
-            logger.warning(
-                "RULE_RESULT_DEFER selected=%s credited=%s kind=%s reward=%.6f",
-                selected_arm,
-                credited_arm,
-                decision_kind,
-                reward,
-            )
-            return
-
-        if decision_kind == "structured":
-            expected = self._structured_arms[self._structured_index]
-            if selected_arm == expected:
-                self._structured_index += 1
-            logger.info(
-                "STRUCTURED_INIT_RESULT completed=%d/%d arm=%s reward=%.6f",
-                self._structured_index,
-                len(self._structured_arms),
-                selected_arm,
-                reward,
-            )
-            return
-
-        if decision_kind == "incumbent_confirm":
-            self._incumbent_confirmation_remaining = max(
-                0,
-                self._incumbent_confirmation_remaining - 1,
-            )
-            logger.info(
-                "INCUMBENT_CONFIRM_RESULT arm=%s reward=%.6f remaining=%d",
-                selected_arm,
-                reward,
-                self._incumbent_confirmation_remaining,
-            )
-            return
-
-        if decision_kind != "candidate" or selected_arm != self._candidate_arm:
-            return
-
-        self._candidate_rewards.append(float(reward))
-        self._epochs_without_improvement += 1
-        baseline = self._candidate_baseline_reward
-
-        if (
-            baseline is not None
-            and baseline > 0
-            and reward < baseline * (1.0 - REWARD_ROLLBACK_THRESHOLD)
-        ):
-            logger.info(
-                "CANDIDATE_ROLLBACK incumbent=%s candidate=%s reward=%.6f "
-                "baseline=%.6f reason=severe_drop",
-                self._incumbent_arm,
-                selected_arm,
-                reward,
-                baseline,
-            )
-            # Re-apply the incumbent on the next valid epoch before trying
-            # another neighbour. This makes the rollback real at the protocol
-            # level and keeps subsequent exploration one parameter away from
-            # the action that is actually running.
-            self._incumbent_confirmation_remaining = 1
-            self._clear_candidate()
-        elif len(self._candidate_rewards) < CANDIDATE_CONFIRMATIONS:
-            logger.info(
-                "CANDIDATE_RESULT arm=%s reward=%.6f collected=%d/%d",
-                selected_arm,
-                reward,
-                len(self._candidate_rewards),
-                CANDIDATE_CONFIRMATIONS,
-            )
-            return
-        else:
-            candidate_mean = sum(self._candidate_rewards) / len(self._candidate_rewards)
-            gain = (
-                (candidate_mean - baseline) / baseline
-                if baseline is not None and baseline > 0
-                else float("-inf")
-            )
-            if gain >= REWARD_IMPROVEMENT_THRESHOLD:
-                previous = self._incumbent_arm
-                self._incumbent_arm = selected_arm
-                self._epochs_without_improvement = 0
-                self._rules_converged = False
-                logger.info(
-                    "CANDIDATE_ACCEPT previous=%s incumbent=%s mean_reward=%.6f "
-                    "baseline=%.6f gain=%.6f",
-                    previous,
-                    selected_arm,
-                    candidate_mean,
-                    baseline,
-                    gain,
-                )
-            else:
-                logger.info(
-                    "CANDIDATE_REJECT incumbent=%s candidate=%s mean_reward=%.6f "
-                    "baseline=%s gain=%s",
-                    self._incumbent_arm,
-                    selected_arm,
-                    candidate_mean,
-                    f"{baseline:.6f}" if baseline is not None else "n/a",
-                    f"{gain:.6f}" if np.isfinite(gain) else "n/a",
-                )
-                self._incumbent_confirmation_remaining = 1
-            self._clear_candidate()
-
-        if self._epochs_without_improvement >= NO_IMPROVEMENT_EPOCHS:
-            self._rules_converged = True
-            logger.info(
-                "CMAB_RULES_CONVERGED incumbent=%s no_improvement_epochs=%d",
-                self._incumbent_arm,
-                self._epochs_without_improvement,
-            )
 
     def _get_max_epoch(self) -> int:
         files = list(self.metrics_dir.glob("global_state_epoch_*.json"))
