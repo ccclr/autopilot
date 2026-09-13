@@ -85,41 +85,41 @@ class CMABActionEncodingConfigTests(TestCase):
 
         self.assertIn('--cmab-seed 0', command)
 
-    def test_factorized_reward_defaults_to_false(self):
-        parameters = BenchParameters(_parameters())
+    def test_accepts_factorized_policy(self):
+        parameters = BenchParameters(_parameters(cmab_policy='factorized'))
 
-        self.assertFalse(parameters.enable_factorized_reward)
+        self.assertEqual(parameters.cmab_policy, 'factorized')
 
-    def test_accepts_enable_factorized_reward(self):
-        parameters = BenchParameters(
-            _parameters(enable_factorized_reward=True)
-        )
+    def test_accepts_combined_policy(self):
+        parameters = BenchParameters(_parameters(cmab_policy='combined'))
 
-        self.assertTrue(parameters.enable_factorized_reward)
+        self.assertEqual(parameters.cmab_policy, 'combined')
 
-    def test_controller_command_contains_factorized_flag(self):
+    def test_controller_command_contains_factorized_policy(self):
         command = CommandMaker.run_controller(
             node_index=0,
             repo_name='autopilot',
             log_dir='/local/logs',
             parameters_file='/local/.parameters.json',
             rl_algo='cmab',
-            enable_factorized_reward=True,
+            cmab_policy='factorized',
         )
 
-        self.assertIn('--enable-factorized-reward', command)
-
-    def test_controller_command_omits_factorized_flag_when_disabled(self):
-        command = CommandMaker.run_controller(
-            node_index=0,
-            repo_name='autopilot',
-            log_dir='/local/logs',
-            parameters_file='/local/.parameters.json',
-            rl_algo='cmab',
-            enable_factorized_reward=False,
-        )
-
+        self.assertIn('--policy factorized', command)
         self.assertNotIn('--enable-factorized-reward', command)
+
+    def test_controller_command_contains_combined_policy(self):
+        command = CommandMaker.run_controller(
+            node_index=0,
+            repo_name='autopilot',
+            log_dir='/local/logs',
+            parameters_file='/local/.parameters.json',
+            rl_algo='cmab',
+            cmab_policy='combined',
+        )
+
+        self.assertIn('--policy combined', command)
+        self.assertNotIn('--enable-combined-reward', command)
 
     def test_cmab_policy_defaults_to_rf_ts(self):
         parameters = BenchParameters(_parameters())

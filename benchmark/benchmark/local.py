@@ -229,9 +229,6 @@ class LocalBench:
             warmup_iterations = getattr(self.bench_parameters, 'rl_warmup_iterations', 5)
             enable_accelerator = getattr(self.bench_parameters, 'enable_accelerator', False)
             accelerator_period = getattr(self.bench_parameters, 'accelerator_period', 100)
-            enable_factorized_reward = getattr(
-                self.bench_parameters, 'enable_factorized_reward', False
-            )
             cmab_policy = getattr(self.bench_parameters, 'cmab_policy', 'rf_ts')
             cmab_start_pos = getattr(self.bench_parameters, 'cmab_start_pos', 0)
             Print.info(f'RL algo: {rl_algo}')
@@ -239,7 +236,6 @@ class LocalBench:
                 Print.info(f'Action encoding: {cmab_action_encoding}')
             Print.info(f'CMAB seed: {cmab_seed}')
             Print.info(f'RL warmup iterations: {warmup_iterations}')
-            Print.info(f'RL factorized reward: enabled={enable_factorized_reward}')
             Print.info(f'CMAB policy: {cmab_policy}')
             Print.info(f'CMAB start pos: {cmab_start_pos}')
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
@@ -261,9 +257,6 @@ class LocalBench:
                     warmup_iterations=warmup_iterations,
                     enable_accelerator=enable_accelerator,
                     accelerator_period=accelerator_period,
-                    enable_factorized_reward=(
-                        enable_factorized_reward if rl_algo == 'cmab' else None
-                    ),
                     cmab_policy=(cmab_policy if rl_algo == 'cmab' else None),
                     cmab_start_pos=(cmab_start_pos if rl_algo == 'cmab' else None),
                 )

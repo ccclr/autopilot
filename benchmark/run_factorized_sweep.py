@@ -108,12 +108,12 @@ def latest_epoch(metrics_dir: Path) -> tuple[int | None, float | None]:
 
 
 def start_fab(factorized: bool, seed: int) -> subprocess.Popen:
-    flag = "--enable-factorized-reward" if factorized else "--no-enable-factorized-reward"
+    policy = "factorized" if factorized else "rf_ts"
     cmd = [
         "fab",
         "remote",
         f"--cmab-seed={seed}",
-        flag,
+        f"--cmab-policy={policy}",
         f"--duration={FAB_DURATION}",
     ]
     log_path = EXP_ROOT / "current_fab.log"

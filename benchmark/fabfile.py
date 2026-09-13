@@ -49,9 +49,8 @@ def local(ctx, debug=False, enable_accelerator=False, accelerator_period=100):
         # Pair this seed with the matching one_hot run; change only between reps.
         'cmab_seed': 0,
         'rl_warmup_iterations': 5,
-        # False: single global-reward RF (numeric/one_hot encoding).
-        # True: hierarchical factorized reward (main effects + cut×k, timeout×k).
-        'enable_factorized_reward': False,
+        # rf_ts: global RF. factorized / combined: dedicated reward models.
+        'cmab_policy': 'rf_ts',
         'enable_accelerator': bool(enable_accelerator),
         'accelerator_period': int(accelerator_period),
 
@@ -181,8 +180,7 @@ def remote(
     cmab_seed=0,
     cmab_action_encoding='numeric',
     duration=10800,
-    enable_factorized_reward=True,
-    cmab_policy='rf_ts',
+    cmab_policy='factorized',
     cmab_start_pos=0,
 ):
     ''' Run benchmarks on CloudLab. '''
@@ -190,9 +188,12 @@ def remote(
     if encoding not in ('numeric', 'one_hot'):
         raise ValueError('cmab_action_encoding must be "numeric" or "one_hot"')
     policy = str(cmab_policy).lower()
-    if policy not in ('rf_ts', 'random', 'default', 'round_robin'):
+    if policy not in (
+        'rf_ts', 'random', 'default', 'round_robin', 'factorized', 'combined'
+    ):
         raise ValueError(
-            'cmab_policy must be one of rf_ts, random, default, round_robin'
+            'cmab_policy must be one of rf_ts, random, default, '
+            'round_robin, factorized, combined'
         )
     try:
         start_pos = int(cmab_start_pos)
@@ -200,15 +201,16 @@ def remote(
         raise ValueError('cmab_start_pos must be an integer >= 0') from exc
     if start_pos < 0:
         raise ValueError('cmab_start_pos must be an integer >= 0')
-    factorized = bool(enable_factorized_reward)
     resume_from = "/users/clr0302/checkpoints/cmab_factorized/cmab_checkpoint_50.pkl"
     applied_begin = 42
     if policy == 'round_robin':
         # Designed coverage run: cycle the catalog, do not resume a greedy
         # checkpoint, and give apply a wider slot window so configs land.
-        factorized = False
         resume_from = None
         applied_begin = 24
+    elif policy != 'factorized':
+        # Only the factorized resume path matches FactorizedCMABPolicy.
+        resume_from = None
     bench_params = {
         'faults': 0,
         'nodes': [4],
@@ -231,12 +233,10 @@ def remote(
         # Pair numeric/one_hot with the same seed; change only between reps.
         'cmab_seed': int(cmab_seed),
         'rl_warmup_iterations': 5,
+        # rf_ts: global RF. factorized / combined: dedicated reward models.
+        # random / default / round_robin: selection-only.
         'cmab_policy': policy,
         'cmab_start_pos': start_pos,
-        # False: keep the current global-reward RF (numeric/one_hot).
-        # True: switch the trainer to FactorizedCMABPolicy. Do not resume from
-        # a global RF checkpoint when this is True; set cmab_resume_from=None.
-        'enable_factorized_reward': factorized,
         'enable_accelerator': False,
         'accelerator_period': 20,
 

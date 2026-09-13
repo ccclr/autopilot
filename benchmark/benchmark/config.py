@@ -317,21 +317,19 @@ class BenchParameters:
             else:
                 self.enable_accelerator = bool(enable_acc)
 
-            enable_factorized = json.get('enable_factorized_reward', False)
-            if enable_factorized in (None, '', False, 0, '0', 'false', 'False'):
-                self.enable_factorized_reward = False
-            else:
-                self.enable_factorized_reward = bool(enable_factorized)
-
             cmab_policy = json.get('cmab_policy', 'rf_ts')
             if cmab_policy in (None, ''):
                 cmab_policy = 'rf_ts'
             if not isinstance(cmab_policy, str):
                 raise ConfigError('cmab_policy must be a string')
             cmab_policy = cmab_policy.lower()
-            if cmab_policy not in ('rf_ts', 'random', 'default', 'round_robin'):
+            if cmab_policy not in (
+                'rf_ts', 'random', 'default', 'round_robin',
+                'factorized', 'combined',
+            ):
                 raise ConfigError(
-                    'cmab_policy must be one of rf_ts, random, default, round_robin'
+                    'cmab_policy must be one of rf_ts, random, default, '
+                    'round_robin, factorized, combined'
                 )
             self.cmab_policy = cmab_policy
 

@@ -108,7 +108,6 @@ class AutopilotController:
         warmup_iterations: int = 5,
         enable_accelerator: bool = False,
         accelerator_period: int = 100,
-        enable_factorized_reward: bool = False,
         cmab_policy: str = "rf_ts",
         cmab_start_pos: int = 0,
     ):
@@ -128,10 +127,8 @@ class AutopilotController:
                 GP-BO / KernelUCB: collect N cold-start samples before first model fit.
             enable_accelerator: periodically probe latency and prune timeout arms.
             accelerator_period: idle epochs between master probes (apply 5 epochs later).
-            enable_factorized_reward: use hierarchical factorized RFs instead of
-                a single global-reward forest.
             cmab_policy: forwarded to the trainer as --policy
-                (rf_ts / random / default / round_robin).
+                (rf_ts / random / default / round_robin / factorized / combined).
             cmab_start_pos: round-robin catalog index for consensus epoch 0.
                 Every node must receive the same value.
         """
@@ -152,9 +149,15 @@ class AutopilotController:
         self.warmup_iterations = max(0, int(warmup_iterations))
         self.enable_accelerator = bool(enable_accelerator)
         self.accelerator_period = max(1, int(accelerator_period))
-        self.enable_factorized_reward = bool(enable_factorized_reward)
         self.cmab_policy = str(cmab_policy or "rf_ts").lower()
-        if self.cmab_policy not in ("rf_ts", "random", "default", "round_robin"):
+        if self.cmab_policy not in (
+            "rf_ts",
+            "random",
+            "default",
+            "round_robin",
+            "factorized",
+            "combined",
+        ):
             raise ValueError(f"Unsupported CMAB policy: {self.cmab_policy}")
         self.cmab_start_pos = int(cmab_start_pos)
         if self.cmab_start_pos < 0:
@@ -216,8 +219,10 @@ class AutopilotController:
             return home / "kernel_ucb_checkpoints"
         if self.rl_algo == "xgboost":
             return home / "xgboost_checkpoints"
-        if self.rl_algo == "cmab" and self.enable_factorized_reward:
+        if self.rl_algo == "cmab" and self.cmab_policy == "factorized":
             return home / "checkpoints" / "cmab_factorized"
+        if self.rl_algo == "cmab" and self.cmab_policy == "combined":
+            return home / "checkpoints" / "cmab_combined"
         if self.rl_algo == "cmab" and self.cmab_action_encoding == "one_hot":
             # Keep experimental one-hot checkpoints away from legacy numeric
             # checkpoints while preserving the original numeric path.
@@ -249,8 +254,6 @@ class AutopilotController:
             ]
             if self.enable_accelerator:
                 cmd.append("--enable-accelerator")
-            if self.enable_factorized_reward and self.rl_algo == "cmab":
-                cmd.append("--enable-factorized-reward")
             if self.rl_algo == "cmab":
                 cmd.extend(["--policy", str(self.cmab_policy)])
                 cmd.extend(["--start-pos", str(self.cmab_start_pos)])
@@ -398,19 +401,16 @@ def main():
         ),
     )
     parser.add_argument(
-        '--enable-factorized-reward',
-        action='store_true',
-        help=(
-            'Use hierarchical factorized reward RFs instead of a single '
-            'global-reward forest'
-        ),
-    )
-    parser.add_argument(
         '--policy',
         type=str,
         default='rf_ts',
-        choices=['rf_ts', 'random', 'default', 'round_robin'],
-        help='CMAB selection policy forwarded to train_cmab_continuous.py',
+        choices=[
+            'rf_ts', 'random', 'default', 'round_robin', 'factorized', 'combined'
+        ],
+        help=(
+            'CMAB policy forwarded to train_cmab_continuous.py: '
+            'rf_ts / random / default / round_robin / factorized / combined'
+        ),
     )
     parser.add_argument(
         '--start-pos',
@@ -442,7 +442,6 @@ def main():
     print(f"🎲 CMAB seed: {args.cmab_seed}")
     print(f"🔁 Resume from: {args.resume_from}")
     print(f"🔥 Warmup iterations: {args.warmup_iterations}")
-    print(f"🧩 Factorized reward: enabled={args.enable_factorized_reward}")
     print(f"🎯 CMAB policy: {args.policy}")
     print(f"📍 CMAB start pos: {args.start_pos}")
     print(f"⚡ Accelerator: enabled={args.enable_accelerator} period={args.accelerator_period} epochs")
@@ -463,7 +462,6 @@ def main():
             warmup_iterations=args.warmup_iterations,
             enable_accelerator=args.enable_accelerator,
             accelerator_period=args.accelerator_period,
-            enable_factorized_reward=args.enable_factorized_reward,
             cmab_policy=args.policy,
             cmab_start_pos=args.start_pos,
         )

@@ -250,7 +250,6 @@ class CommandMaker:
         warmup_iterations=None,
         enable_accelerator=None,
         accelerator_period=None,
-        enable_factorized_reward=None,
         cmab_policy=None,
         cmab_start_pos=None,
     ):
@@ -278,8 +277,6 @@ class CommandMaker:
             cmd += f' --warmup-iterations {int(warmup_iterations)}'
         if enable_accelerator:
             cmd += ' --enable-accelerator'
-        if enable_factorized_reward:
-            cmd += ' --enable-factorized-reward'
         if cmab_policy:
             cmd += f' --policy {shlex.quote(str(cmab_policy))}'
         if cmab_start_pos is not None:
