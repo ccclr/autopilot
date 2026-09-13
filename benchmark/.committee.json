@@ -1,6 +1,23 @@
 {
     "authorities": {
-        "3kEqf2wScZvIqN709iAiKOPKf3Azuv0RKCoTFTPeEqc=": {
+        "+8T2dVjN+a+ViHENC0MZ6R2J/tO+3jiA36/fNGLTFCk=": {
+            "consensus": {
+                "consensus_to_consensus": "10.10.1.4:5018"
+            },
+            "primary": {
+                "primary_to_primary": "10.10.1.4:5019",
+                "worker_to_primary": "10.10.1.4:5020"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.10.1.4:5021",
+                    "transactions": "10.10.1.4:5022",
+                    "worker_to_worker": "10.10.1.4:5023"
+                }
+            }
+        },
+        "6XLpGKehhAQrr1G8w4IMmI9msdzDYEPvKNL/JKIvOJ8=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.3:5012"
             },
@@ -17,24 +34,7 @@
                 }
             }
         },
-        "V24dG6aSUHJwgA64Kd2m2icmgfXJ95UvZcaSDwNalww=": {
-            "consensus": {
-                "consensus_to_consensus": "10.10.1.2:5006"
-            },
-            "primary": {
-                "primary_to_primary": "10.10.1.2:5007",
-                "worker_to_primary": "10.10.1.2:5008"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.10.1.2:5009",
-                    "transactions": "10.10.1.2:5010",
-                    "worker_to_worker": "10.10.1.2:5011"
-                }
-            }
-        },
-        "VvDyK/z9Z/WsrvZNmbNuYfbi9H3A1UiB/HkFoAbzPEg=": {
+        "L6hzqTXeQ0T/x8YSWQqWDFtlWcJXd1Hu7fzLtlmhHAg=": {
             "consensus": {
                 "consensus_to_consensus": "10.10.1.1:5000"
             },
@@ -51,20 +51,20 @@
                 }
             }
         },
-        "kHJzavOEBUfrDjIHZ2h2rS29QL5N1c0aiNU25jxfzI4=": {
+        "MHUzTxcZp/UDyN0sZIVfLoTjI+OKmdfU7EfZ8wz7+lg=": {
             "consensus": {
-                "consensus_to_consensus": "10.10.1.4:5018"
+                "consensus_to_consensus": "10.10.1.2:5006"
             },
             "primary": {
-                "primary_to_primary": "10.10.1.4:5019",
-                "worker_to_primary": "10.10.1.4:5020"
+                "primary_to_primary": "10.10.1.2:5007",
+                "worker_to_primary": "10.10.1.2:5008"
             },
             "stake": 1,
             "workers": {
                 "0": {
-                    "primary_to_worker": "10.10.1.4:5021",
-                    "transactions": "10.10.1.4:5022",
-                    "worker_to_worker": "10.10.1.4:5023"
+                    "primary_to_worker": "10.10.1.2:5009",
+                    "transactions": "10.10.1.2:5010",
+                    "worker_to_worker": "10.10.1.2:5011"
                 }
             }
         }

@@ -198,6 +198,11 @@ impl Proposer {
         let mut current_time = Instant::now();
 
         loop {
+            while let Ok((digest, worker_id, metadata)) = self.rx_workers.try_recv() {
+                self.payload_size += digest.size();
+                self.digests.push((digest, worker_id, metadata));
+            }
+
             // Check if we can propose a new header. We propose a new header when one of the following
             // conditions is met:
             // 1. We have a quorum of certificates from the previous round and enough batches' digests;

@@ -11,7 +11,7 @@ use crypto::PublicKey;
 use ed25519_dalek::{Digest as _, Sha512};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use log::debug;
+use log::{debug, warn};
 //#[cfg(feature = "benchmark")]
 use config::get_metrics_logger;
 use log::info;
@@ -400,10 +400,12 @@ impl BatchMaker {
 
         // Store the batch.
         self.store.write(digest.to_vec(), serialized.clone()).await;
-        self.tx_batch
-            .send(serialized.clone())
-            .await
-            .expect("Failed to deliver batch");
+        if self.tx_batch.try_send(serialized.clone()).is_err() {
+            warn!(
+                "BatchMaker: processor channel full, dropping batch {:?}",
+                digest
+            );
+        }
         if self.during_simulated_asynchrony {
             debug!("BatchMaker: Simulated asynchrony enabled. Only sending to partitioned keys from broadcast");
             let new_addresses: Vec<_> = self
