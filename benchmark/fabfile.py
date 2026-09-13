@@ -176,11 +176,11 @@ from fabric import task
 @task
 def remote(
     ctx,
-    debug=False,
+    debug=True,
     cmab_seed=0,
     cmab_action_encoding='numeric',
-    duration=10800,
-    cmab_policy='factorized',
+    duration=3600,
+    cmab_policy='combined',
     cmab_start_pos=0,
 ):
     ''' Run benchmarks on CloudLab. '''
@@ -201,16 +201,8 @@ def remote(
         raise ValueError('cmab_start_pos must be an integer >= 0') from exc
     if start_pos < 0:
         raise ValueError('cmab_start_pos must be an integer >= 0')
-    resume_from = "/users/clr0302/checkpoints/cmab_factorized/cmab_checkpoint_50.pkl"
+    resume_from = None
     applied_begin = 42
-    if policy == 'round_robin':
-        # Designed coverage run: cycle the catalog, do not resume a greedy
-        # checkpoint, and give apply a wider slot window so configs land.
-        resume_from = None
-        applied_begin = 24
-    elif policy != 'factorized':
-        # Only the factorized resume path matches FactorizedCMABPolicy.
-        resume_from = None
     bench_params = {
         'faults': 0,
         'nodes': [4],
@@ -264,11 +256,11 @@ def remote(
         'use_optimistic_tips': True,
         'use_parallel_proposals': True,
         'k': 4,
-        'epoch_slots': 48,
-        'window_size': 8,
+        'epoch_slots': 60,
+        'window_size': 12,
         # Apply on first commit at/after this position (Rust uses >=).
         # Keep well below epoch_slots so k-parallel slot skips still land.
-        'applied_begin': applied_begin,
+        'applied_begin': 56,
         'use_fast_path': True,
         'fast_path_timeout': 100,
         'use_ride_share': False,

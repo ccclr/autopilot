@@ -1,7 +1,7 @@
 {
     "affected_nodes": [],
     "aggregation_strategy": "normal",
-    "applied_begin": 24,
+    "applied_begin": 56,
     "asynchrony_duration": [
         3000
     ],
@@ -28,7 +28,7 @@
         0,
         0
     ],
-    "epoch_slots": 48,
+    "epoch_slots": 60,
     "fast_path_timeout": 100,
     "gc_depth": 50,
     "header_size": 32,
@@ -45,5 +45,5 @@
     "use_optimistic_tips": true,
     "use_parallel_proposals": true,
     "use_ride_share": false,
-    "window_size": 8
+    "window_size": 12
 }

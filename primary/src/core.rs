@@ -1781,52 +1781,13 @@ impl Core {
                 proposals,
                 aggregate_report: _,
             } => {
-                let next_leader = self.leader_elector.get_leader(slot + 1, 1);
-
-                // If not the next leader
-                if self.name != next_leader {
-                    debug!("not the next leader");
-                    if false {
-                        //forward the prepare message to the appropriate leader to ensure timeouts that respect honest leader  // TODO: Turn off to maximize perf in gracious intervals
-                        let address = self
-                            .committee
-                            .primary(&next_leader)
-                            .expect("Author of valid header is not in the committee")
-                            .primary_to_primary;
-                        let bytes = bincode::serialize(&PrimaryMessage::ConsensusMessage(
-                            prepare_message.clone(),
-                        ))
-                        .expect("Failed to serialize prepare message");
-                        let handler = self.network.send(address, Bytes::from(bytes)).await;
-                        self.cancel_handlers
-                            .entry(self.current_header.height())
-                            .or_insert_with(Vec::new)
-                            .push(handler);
-                        //println!("forwarding to the leader");
-
-                        self.send_msg(
-                            PrimaryMessage::ConsensusMessage(prepare_message.clone()),
-                            self.current_header.height(),
-                            Some(next_leader),
-                            false,
-                        )
-                        .await;
-                    }
-                    return Ok(());
-                }
-
-                // If we are the leader of the next slot, view 1, and have already proposed in the next slot
-                // then don't process the prepare ticket, just return true
-                if self.already_proposed_slots.contains(&(slot + 1)) {
-                    debug!("already proposed for slot {}", slot + 1);
-                    return Ok(());
-                }
-
-                //Check that we have bounded instances.
-                // => Wait for instance s - k to commit. This ensures that <= k consecutive instances are open at any time (since we also only start if have prepare ticket from s-1)
-
+                // Ticket for next_slot. Every replica (not just the next leader) must
+                // observe the same "slot is startable" condition so view-1 timeouts
+                // do not begin while we are still waiting for cut-condition coverage.
                 let next_slot = *slot + 1;
                 let ticket_k = self.effective_k_for_prepare_slot(next_slot);
+
+                // Bound open instances: wait for next_slot - k to commit.
                 if next_slot > ticket_k {
                     debug!("beyond init k for slot {}", *slot);
                     if !self.committed_slots.contains_key(&(next_slot - ticket_k)) {
@@ -1835,73 +1796,8 @@ impl Core {
                         return Ok(());
                     }
                 }
-                // if slot + 1 > self.last_committed_slot + self.k {
-                //     //println!("too many instances open");
-                //     self.prepare_tickets.push_back(prepare_message.clone());
-                //     return Ok(())
-                // }
 
-                // If there is enough coverage and we haven't already proposed in the next slot then create a new
-                // prepare message if we are the leader of view 1 in the next slot
-                //let new_proposals = self.current_proposal_tips.clone();
-                if self.enough_coverage(&proposals) {
-                    //}, &new_proposals) {
-                    debug!("have enough coverage to start slot {}", slot + 1);
-
-                    let qc_ticket = match next_slot > ticket_k {
-                        true => Some(
-                            self.committed_slots
-                                .get(&(next_slot - ticket_k))
-                                .unwrap()
-                                .clone(),
-                        ), //Validate this QC at recipient. Only necessary if not local available. Process if new!
-                        false => None,
-                    };
-
-                    let expected_epoch = self.epoch_index_for_slot(slot + 1);
-                    let aggregate_report = self.get_pending_aggregate_report(expected_epoch);
-                    if let Some(report) = aggregate_report.as_ref() {
-                        info!(
-                            "📦 Embedding AggregateReport digest {} into Prepare(slot={}, view=1)",
-                            report.digest(),
-                            slot + 1
-                        );
-                    }
-
-                    let new_prepare_instance = ConsensusMessage::Prepare {
-                        slot: slot + 1,
-                        view: 1,
-                        tc: None,
-                        qc_ticket,
-                        proposals: HashMap::new(), //new_proposals,
-                        aggregate_report,
-                    };
-
-                    //println!("The new slot is {:?}", slot + 1);
-                    self.already_proposed_slots.insert(slot + 1);
-                    //self.prepare_tickets.pop_front();
-
-                    //TODO: Start measuring consensus latency from here. Measure latency for a slots commit
-                    // #[cfg(feature = "benchmark")]
-                    // // NOTE: This log entry is used to compute performance.
-                    // info!("Started slot {}", slot + 1);
-                    //
-
-                    if self.use_ride_share {
-                        self.tx_info
-                            .send(new_prepare_instance)
-                            .await
-                            .expect("failed to send info to proposer");
-                    } else {
-                        debug!("enough coverage!");
-                        self.send_consensus_req(new_prepare_instance).await?;
-                    }
-
-                    return Ok(());
-                } else {
-                    // Not enough coverage, add this prepare ticket to the pending queue
-                    // until enough new proposals have arrived
-                    //println!("prepare ticket not ready");
+                if !self.enough_coverage(&proposals) {
                     debug!(
                         "adding prepare ticket to queue for message {:?}",
                         prepare_message
@@ -1909,6 +1805,70 @@ impl Core {
                     self.prepare_tickets.push_back(prepare_message.clone());
                     return Ok(());
                 }
+
+                debug!("have enough coverage to start slot {}", next_slot);
+                if !self.committed_slots.contains_key(&next_slot)
+                    && !self.timers.contains(&(next_slot, 1))
+                {
+                    debug!("start timer for slot {} view 1", next_slot);
+                    self.timer_futures
+                        .push(Box::pin(Timer::new(next_slot, 1, self.timeout_delay)));
+                    self.timers.insert((next_slot, 1));
+                }
+
+                let next_leader = self.leader_elector.get_leader(next_slot, 1);
+                if self.name != next_leader {
+                    debug!("not the next leader");
+                    return Ok(());
+                }
+
+                if self.already_proposed_slots.contains(&next_slot) {
+                    debug!("already proposed for slot {}", next_slot);
+                    return Ok(());
+                }
+
+                let qc_ticket = match next_slot > ticket_k {
+                    true => Some(
+                        self.committed_slots
+                            .get(&(next_slot - ticket_k))
+                            .unwrap()
+                            .clone(),
+                    ),
+                    false => None,
+                };
+
+                let expected_epoch = self.epoch_index_for_slot(next_slot);
+                let aggregate_report = self.get_pending_aggregate_report(expected_epoch);
+                if let Some(report) = aggregate_report.as_ref() {
+                    info!(
+                        "📦 Embedding AggregateReport digest {} into Prepare(slot={}, view=1)",
+                        report.digest(),
+                        next_slot
+                    );
+                }
+
+                let new_prepare_instance = ConsensusMessage::Prepare {
+                    slot: next_slot,
+                    view: 1,
+                    tc: None,
+                    qc_ticket,
+                    proposals: HashMap::new(),
+                    aggregate_report,
+                };
+
+                self.already_proposed_slots.insert(next_slot);
+
+                if self.use_ride_share {
+                    self.tx_info
+                        .send(new_prepare_instance)
+                        .await
+                        .expect("failed to send info to proposer");
+                } else {
+                    debug!("enough coverage!");
+                    self.send_consensus_req(new_prepare_instance).await?;
+                }
+
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -2431,23 +2391,15 @@ impl Core {
                 // TODO: Remove from process_header
                 let x = self.is_prepare_ticket_ready(prepare_message).await;
 
-                let next_slot = *slot + 1;
-                let slot_k = self.effective_k_for_prepare_slot(next_slot);
-                if slot_k > 1 {
-                    //check whether a) we have already committed; and if not b) whether ticket is ready (prepare and QC)
-                    if !self.committed_slots.contains_key(&next_slot)
-                        && !self.timers.contains(&(next_slot, 1))
-                        && (next_slot <= slot_k
-                            || self.committed_slots.contains_key(&(next_slot - slot_k)))
-                    {
-                        debug!("start timer for slot {}", next_slot);
-                        let timer = Timer::new(next_slot, 1, self.timeout_delay);
-                        self.timer_futures.push(Box::pin(timer));
-                        self.timers.insert((next_slot, 1));
-                    } else {
-                        debug!("buffered prepare ticket for slot {}, not commit contains is {}, not timer contains is {}, commit contains key is {}", slot + 1,
-                            !self.committed_slots.contains_key(&next_slot), !self.timers.contains(&(next_slot, 1)), next_slot <= slot_k || self.committed_slots.contains_key(&(next_slot - slot_k)));
-                    }
+                // View-1 timeout for this slot starts when its Prepare is processed.
+                if *view == 1
+                    && !self.committed_slots.contains_key(slot)
+                    && !self.timers.contains(&(*slot, 1))
+                {
+                    debug!("start timer for slot {} view 1", slot);
+                    self.timer_futures
+                        .push(Box::pin(Timer::new(*slot, 1, self.timeout_delay)));
+                    self.timers.insert((*slot, 1));
                 }
 
                 for (pk, proposal) in proposals {
@@ -2846,27 +2798,18 @@ impl Core {
 
                 let next_slot_k = self.effective_k_for_qc_slot(*slot);
                 let timer_slot = *slot + next_slot_k;
-                if next_slot_k == 1 {
-                    //Start timer for next slot
-                    if !self.timers.contains(&(timer_slot, 1)) {
-                        debug!("start timer for slot {}", timer_slot);
-                        let timer = Timer::new(timer_slot, 1, self.timeout_delay);
-                        self.timer_futures.push(Box::pin(timer));
-                        self.timers.insert((timer_slot, 1));
-                    }
-                } else {
-                    //If slot + k has ticket ready (Prepare from s+k-1 + QC in s)
-                    if !self.timers.contains(&(timer_slot, 1))
-                        && self.views.contains_key(&(timer_slot - 1))
-                    {
-                        debug!("start timer for slot {}", timer_slot);
-                        let timer = Timer::new(timer_slot, 1, self.timeout_delay);
-                        self.timer_futures.push(Box::pin(timer));
-                        self.timers.insert((timer_slot, 1));
-                    } else {
-                        debug!("did not start timer for slot {}, not timer contains is {}, views contains is {}", timer_slot, !self.timers.contains(&(timer_slot, 1)), self.views.contains_key(&(timer_slot - 1)));
-                    }
+                if next_slot_k == 1
+                    && !self.committed_slots.contains_key(&timer_slot)
+                    && !self.timers.contains(&(timer_slot, 1))
+                {
+                    debug!("start timer for slot {} view 1", timer_slot);
+                    self.timer_futures
+                        .push(Box::pin(Timer::new(timer_slot, 1, self.timeout_delay)));
+                    self.timers.insert((timer_slot, 1));
                 }
+                // k>1: do not start slot+k's view-1 timer here. That slot may still
+                // be waiting for cut-condition coverage. try_prepare_waiting_slots
+                // below starts the timer once the ticket is actually actionable.
 
                 // // Only send to committer if proposals and all ancestors are stored locally,
                 // // otherwise sync will be triggered, and this commit message will be reprocessed
