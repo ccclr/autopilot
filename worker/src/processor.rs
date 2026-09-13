@@ -93,6 +93,7 @@ impl Processor {
                 store.write(digest.to_vec(), batch).await;
 
                 // Deliver the batch's digest and metadata.
+                let digest_for_log = digest.clone();
                 let message = match own_digest {
                     true => WorkerPrimaryMessage::OurBatch(digest, id, batch_metadata),
                     false => WorkerPrimaryMessage::OthersBatch(digest, id, batch_metadata),
@@ -102,7 +103,7 @@ impl Processor {
                 if tx_digest.try_send(message).is_err() {
                     warn!(
                         "Processor: digest channel full, dropping batch {:?}",
-                        digest
+                        digest_for_log
                     );
                 }
             }
