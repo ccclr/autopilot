@@ -14,6 +14,13 @@ use tokio::time::{sleep, Duration, Instant};
 #[path = "tests/proposer_tests.rs"]
 pub mod proposer_tests;
 
+/// Soft cap on batches per car. `header_size` is only the early-propose
+/// threshold; taking the whole backlog (hundreds of digests) makes a header
+/// that cannot be certified, but capping at `header_size` itself starves
+/// throughput. Healthy cars carry a handful of batches; 16 is above that
+/// and still far below the 200+ cars that froze a lane.
+const MAX_DIGESTS_PER_HEADER: usize = 16;
+
 /// The proposer creates new headers and send them to the core for broadcasting and further processing.
 pub struct Proposer {
     /// The public key of this primary.
@@ -102,19 +109,11 @@ impl Proposer {
         });
     }
 
-    /// Take only enough queued digests to fill `header_size`. Leftover stays
-    /// for later cars so a backlog cannot become one un-certifiable header.
+    /// Take the queued digests, but never more than `MAX_DIGESTS_PER_HEADER`.
     fn take_digests_for_header(&mut self) -> Vec<(Digest, WorkerId, config::BatchMetadata)> {
-        let mut take_n = 0;
-        let mut taken_size = 0;
-        for (digest, _, _) in &self.digests {
-            if take_n > 0 && taken_size >= self.header_size {
-                break;
-            }
-            taken_size += digest.size();
-            take_n += 1;
-        }
+        let take_n = self.digests.len().min(MAX_DIGESTS_PER_HEADER);
         let drained: Vec<_> = self.digests.drain(..take_n).collect();
+        let taken_size: usize = drained.iter().map(|(digest, _, _)| digest.size()).sum();
         self.payload_size = self.payload_size.saturating_sub(taken_size);
         drained
     }
