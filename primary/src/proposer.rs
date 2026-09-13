@@ -102,39 +102,27 @@ impl Proposer {
         });
     }
 
+    /// Take only enough queued digests to fill `header_size`. Leftover stays
+    /// for later cars so a backlog cannot become one un-certifiable header.
+    fn take_digests_for_header(&mut self) -> Vec<(Digest, WorkerId, config::BatchMetadata)> {
+        let mut take_n = 0;
+        let mut taken_size = 0;
+        for (digest, _, _) in &self.digests {
+            if take_n > 0 && taken_size >= self.header_size {
+                break;
+            }
+            taken_size += digest.size();
+            take_n += 1;
+        }
+        let drained: Vec<_> = self.digests.drain(..take_n).collect();
+        self.payload_size = self.payload_size.saturating_sub(taken_size);
+        drained
+    }
+
     async fn make_header(&mut self) {
-        // Make a new header.
         debug!("digests size before is {:?}", self.digests.len());
-        /*let mut header: Header;
-        if self.digests.len() > 0 {
-            let drained: Vec<_> = self.digests.drain(..1).collect();
-            let payload: BTreeMap<Digest, WorkerId> = drained.iter().map(|(d, w, _)| (*d, *w)).collect();
-            let batch_metadata: BTreeMap<Digest, config::BatchMetadata> = drained.into_iter().map(|(d, _, m)| (d, m)).collect();
-            header = Header::new(
-                self.name,
-                self.height,
-                payload,
-                batch_metadata,
-                self.last_parent.clone().unwrap(),
-                &mut self.signature_service,
-                self.consensus_instances.clone(),
-                self.num_active_instances,
-            ).await;
-        } else {
-            header = Header::new(
-                self.name,
-                self.height,
-                BTreeMap::new(),
-                BTreeMap::new(),
-                self.last_parent.clone().unwrap(),
-                &mut self.signature_service,
-                self.consensus_instances.clone(),
-                self.num_active_instances,
-            ).await;
 
-        }*/
-
-        let drained: Vec<_> = self.digests.drain(..).collect();
+        let drained = self.take_digests_for_header();
         let payload: BTreeMap<Digest, WorkerId> =
             drained.iter().map(|(d, w, _)| (d.clone(), *w)).collect();
         let batch_metadata: BTreeMap<Digest, config::BatchMetadata> =
@@ -229,9 +217,8 @@ impl Proposer {
                 debug!("is special is {:?}", self.is_special);
                 current_time = Instant::now();
 
-                // Make a new header.
+                // Make a new header. Leftover digests keep their payload_size.
                 self.make_header().await;
-                self.payload_size = 0;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);

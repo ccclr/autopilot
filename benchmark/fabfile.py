@@ -176,7 +176,7 @@ from fabric import task
 @task
 def remote(
     ctx,
-    debug=True,
+    debug=False,
     cmab_seed=0,
     cmab_action_encoding='numeric',
     duration=3600,
