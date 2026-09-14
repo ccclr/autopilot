@@ -329,15 +329,15 @@ class BenchParameters:
                     '"dqn", or "coverage_round_robin"'
                 )
             self.rl_algo = rl_algo.lower()
-            enable_cmab_pairwise_residual_rf = json.get(
-                'enable_cmab_pairwise_residual_rf', False
+            enable_cmab_cut_fpt_cross_feature = json.get(
+                'enable_cmab_cut_fpt_cross_feature', False
             )
-            if not isinstance(enable_cmab_pairwise_residual_rf, bool):
+            if not isinstance(enable_cmab_cut_fpt_cross_feature, bool):
                 raise ConfigError(
-                    'enable_cmab_pairwise_residual_rf must be true or false'
+                    'enable_cmab_cut_fpt_cross_feature must be true or false'
                 )
-            self.enable_cmab_pairwise_residual_rf = (
-                enable_cmab_pairwise_residual_rf
+            self.enable_cmab_cut_fpt_cross_feature = (
+                enable_cmab_cut_fpt_cross_feature
             )
             if self.rl_algo == 'coverage_round_robin' and self.enable_checkpoint:
                 raise ConfigError(

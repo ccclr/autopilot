@@ -134,7 +134,7 @@ class AutopilotController:
         cmab_transition_export_dir: Optional[str] = None,
         cmab_environment_label: str = "unlabeled",
         cmab_transition_run_id: Optional[str] = None,
-        enable_cmab_pairwise_residual_rf: bool = False,
+        enable_cmab_cut_fpt_cross_feature: bool = False,
     ):
         """
         Initialize controller
@@ -160,8 +160,8 @@ class AutopilotController:
         self.log_dir = Path(log_dir)
         self.resume_from = resume_from
         self.rl_algo = (rl_algo or "cmab").lower()
-        self.enable_cmab_pairwise_residual_rf = bool(
-            enable_cmab_pairwise_residual_rf
+        self.enable_cmab_cut_fpt_cross_feature = bool(
+            enable_cmab_cut_fpt_cross_feature
         )
         self.warmup_iterations = max(0, int(warmup_iterations))
         if max_training_iterations is not None and max_training_iterations <= 0:
@@ -334,9 +334,9 @@ class AutopilotController:
                 )
             if (
                 self.rl_algo == "cmab"
-                and self.enable_cmab_pairwise_residual_rf
+                and self.enable_cmab_cut_fpt_cross_feature
             ):
-                cmd.append("--enable-pairwise-residual-rf")
+                cmd.append("--enable-cut-fpt-cross-feature")
             if self.rl_algo == "cmab":
                 cmd.extend(
                     [
@@ -529,11 +529,11 @@ def main():
         help='CMAB random-forest seed (default: 0)',
     )
     parser.add_argument(
-        '--enable-cmab-pairwise-residual-rf',
+        '--enable-cmab-cut-fpt-cross-feature',
         action='store_true',
         help=(
-            'Enable the cut_condition_type x fast_path_timeout residual RF '
-            'on top of the standard CMAB Global RF'
+            'Append a cut_condition_type x fast_path_timeout one-hot cross '
+            'feature to the standard CMAB Global RF input'
         ),
     )
     parser.add_argument(
@@ -598,7 +598,7 @@ def main():
     print(f"📝 Log dir: {args.log_dir}")
     print(f"🧠 RL algo: {args.rl_algo}")
     print(f"🎲 CMAB random-forest seed: {args.cmab_seed}")
-    print(f"🧩 CMAB pairwise residual RF: {args.enable_cmab_pairwise_residual_rf}")
+    print(f"🧩 CMAB Cut-FPT cross feature: {args.enable_cmab_cut_fpt_cross_feature}")
     print(f"🔁 Resume from: {args.resume_from}")
     print(f"🔥 Warmup iterations: {args.warmup_iterations}")
     max_iterations = (
@@ -624,8 +624,8 @@ def main():
             resume_from=args.resume_from,
             rl_algo=args.rl_algo,
             cmab_seed=args.cmab_seed,
-            enable_cmab_pairwise_residual_rf=(
-                args.enable_cmab_pairwise_residual_rf
+            enable_cmab_cut_fpt_cross_feature=(
+                args.enable_cmab_cut_fpt_cross_feature
             ),
             warmup_iterations=args.warmup_iterations,
             max_training_iterations=args.max_training_iterations,

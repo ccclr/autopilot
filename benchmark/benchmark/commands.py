@@ -347,7 +347,7 @@ class CommandMaker:
         dqn_checkpoint_load_mode=None,
         coverage_seed=None,
         cmab_seed=None,
-        enable_cmab_pairwise_residual_rf=False,
+        enable_cmab_cut_fpt_cross_feature=False,
         cmab_transition_export_dir=None,
         cmab_environment_label=None,
         cmab_transition_run_id=None,
@@ -369,8 +369,8 @@ class CommandMaker:
             cmd += f' --resume-from {resume_from}'
         if warmup_iterations is not None:
             cmd += f' --warmup-iterations {int(warmup_iterations)}'
-        if enable_cmab_pairwise_residual_rf:
-            cmd += ' --enable-cmab-pairwise-residual-rf'
+        if enable_cmab_cut_fpt_cross_feature:
+            cmd += ' --enable-cmab-cut-fpt-cross-feature'
         if cmab_transition_export_dir:
             cmd += (
                 ' --cmab-transition-export-dir '

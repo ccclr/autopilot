@@ -49,9 +49,9 @@ def local(ctx, debug=False):
         # Controls the CMAB random forest random_state. It does not replace
         # the per-epoch shared seed derived from the live protocol state.
         'cmab_seed': 0,
-        # Optional Global RF + residual RF over
-        # cut_condition_type x fast_path_timeout. False preserves CMAB.
-        'enable_cmab_pairwise_residual_rf': False,
+        # Optional 12-dimensional cut_condition_type x fast_path_timeout
+        # one-hot cross feature. False preserves the original CMAB input.
+        'enable_cmab_cut_fpt_cross_feature': False,
         'rl_warmup_iterations': 5,
         # Maximum training iterations in this run. None = train until experiment ends.
         'rl_max_training_iterations': 200,
@@ -255,9 +255,9 @@ def remote(ctx, debug=False):
         # Change this value between repetitions to measure sensitivity to RF
         # initialization.
         'cmab_seed': 0,
-        # Set True to enable the optional pairwise residual RF. The standard
-        # Global-RF-only CMAB path remains available when this is False.
-        'enable_cmab_pairwise_residual_rf': False,
+        # Set True to append the optional Cut-FPT one-hot cross feature. The
+        # original 10-dimensional CMAB input remains when this is False.
+        'enable_cmab_cut_fpt_cross_feature': False,
         'rl_warmup_iterations': 0,
         # None means training continues until the experiment ends.
         'rl_max_training_iterations': None,

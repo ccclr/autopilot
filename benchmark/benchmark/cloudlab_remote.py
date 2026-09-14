@@ -864,10 +864,10 @@ class CloudLabBench:
                 # every controller node and is not copied by Fabric.
                 resume_from = getattr(bench_parameters, 'cmab_resume_from', None)
             warmup_iterations = getattr(bench_parameters, 'rl_warmup_iterations', 5)
-            enable_cmab_pairwise_residual_rf = bool(
+            enable_cmab_cut_fpt_cross_feature = bool(
                 getattr(
                     bench_parameters,
-                    'enable_cmab_pairwise_residual_rf',
+                    'enable_cmab_cut_fpt_cross_feature',
                     False,
                 )
             )
@@ -915,8 +915,8 @@ class CloudLabBench:
             Print.info(f'RL checkpoint enabled: {enable_checkpoint}')
             if rl_algo == 'cmab':
                 Print.info(
-                    'CMAB pairwise residual RF enabled: '
-                    f'{enable_cmab_pairwise_residual_rf}'
+                    'CMAB Cut-FPT cross feature enabled: '
+                    f'{enable_cmab_cut_fpt_cross_feature}'
                 )
                 Print.info(
                     'CMAB offline transition export: '
@@ -1074,8 +1074,8 @@ class CloudLabBench:
                         if rl_algo == 'coverage_round_robin'
                         else None
                     ),
-                    enable_cmab_pairwise_residual_rf=(
-                        enable_cmab_pairwise_residual_rf
+                    enable_cmab_cut_fpt_cross_feature=(
+                        enable_cmab_cut_fpt_cross_feature
                         if rl_algo == 'cmab' else False
                     ),
                     cmab_transition_export_dir=cmab_transition_export_dir,

@@ -40,11 +40,11 @@ def main():
     parser.add_argument("--context-mode", type=str, default="dynamic", choices=["dynamic", "full"])
     parser.add_argument("--epsilon", type=float, default=0, help="Epsilon-greedy exploration rate")
     parser.add_argument(
-        "--enable-pairwise-residual-rf",
+        "--enable-cut-fpt-cross-feature",
         action="store_true",
         help=(
-            "Add a small state + cut_condition_type + fast_path_timeout RF "
-            "trained on pre-update Global RF residuals"
+            "Append a 12-dimensional cut_condition_type x "
+            "fast_path_timeout one-hot feature to the standard CMAB input"
         ),
     )
     parser.add_argument("--max-arms", type=int, default=None)
@@ -67,12 +67,12 @@ def main():
     logger.info("Starting Autopilot Continuous CMAB Training")
     logger.info(
         "metrics_dir=%s parameters_file=%s warmup=%d max_iterations=%s "
-        "pairwise_residual_rf=%s",
+        "cut_fpt_cross_feature=%s",
         args.metrics_dir,
         args.parameters_file,
         warmup_iterations,
         args.num_iterations,
-        args.enable_pairwise_residual_rf,
+        args.enable_cut_fpt_cross_feature,
     )
 
     codec = ActionCodec(policy=args.policy)
@@ -85,7 +85,7 @@ def main():
         policy_name=args.policy,
         epsilon=args.epsilon,
         random_state=args.seed,
-        enable_pairwise_residual_rf=args.enable_pairwise_residual_rf,
+        enable_cut_fpt_cross_feature=args.enable_cut_fpt_cross_feature,
     )
     if args.resume_from:
         policy.load(args.resume_from)
@@ -105,15 +105,10 @@ def main():
                     "policy": args.policy,
                     "seed": args.seed,
                     "warmup_iterations": warmup_iterations,
-                    "pairwise_residual_rf": args.enable_pairwise_residual_rf,
-                    "pairwise_feature_schema": (
-                        CMABPolicy.PAIRWISE_FEATURE_SCHEMA
-                        if args.enable_pairwise_residual_rf
-                        else None
-                    ),
-                    "pairwise_target_schema": (
-                        CMABPolicy.PAIRWISE_TARGET_SCHEMA
-                        if args.enable_pairwise_residual_rf
+                    "cut_fpt_cross_feature": args.enable_cut_fpt_cross_feature,
+                    "cut_fpt_cross_schema": (
+                        CMABPolicy.CUT_FPT_CROSS_SCHEMA
+                        if args.enable_cut_fpt_cross_feature
                         else None
                     ),
                 },

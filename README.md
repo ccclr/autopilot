@@ -438,10 +438,11 @@ The CMAB controls 5 consensus parameters, defining a discrete arm space:
 
 **Total Arms**: 2 × 2 × 3 × 4 × 2 = **96 possible configurations**
 
-The standard CMAB uses only its Global RF. Set
-`enable_cmab_pairwise_residual_rf=true` to add the optional small RF over
-`cut_condition_type × fast_path_timeout`; it learns the Global RF's pre-update
-reward residual and its prediction is added directly to the Global RF score.
+The standard CMAB uses its original numerical state/action input. Set
+`enable_cmab_cut_fpt_cross_feature=true` to retain those numerical features and
+append a deterministic 12-dimensional one-hot feature for
+`cut_condition_type × fast_path_timeout`. The same Global RF, reward, replay,
+training, and action-selection paths are used in both modes.
 
 ### Reward Calculation:**
 - Per-node: `reward = 1000 / (latency_ms + 1)`

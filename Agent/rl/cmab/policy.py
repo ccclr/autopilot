@@ -8,9 +8,13 @@ from sklearn.ensemble import RandomForestRegressor
 logger = logging.getLogger(__name__)
 
 class CMABPolicy:
-    PAIRWISE_RESIDUAL_KEYS = ("cut_condition_type", "fast_path_timeout")
-    PAIRWISE_FEATURE_SCHEMA = "state_plus_cut_condition_type_fast_path_timeout_v2"
-    PAIRWISE_TARGET_SCHEMA = "current_global_training_residual_v1"
+    CUT_FPT_KEYS = ("cut_condition_type", "fast_path_timeout")
+    CUT_FPT_PAIRS = tuple(
+        (cut, timeout)
+        for cut in (2.0, 3.0, 4.0)
+        for timeout in (0.0, 100.0, 200.0, 300.0)
+    )
+    CUT_FPT_CROSS_SCHEMA = "cut_condition_type_x_fast_path_timeout_one_hot_v1"
 
     def __init__(
         self,
@@ -26,7 +30,7 @@ class CMABPolicy:
         epsilon_decay: float = 0.99,
         min_epsilon: float = 0,
         replay_window: int = 200,
-        enable_pairwise_residual_rf: bool = False,
+        enable_cut_fpt_cross_feature: bool = False,
     ):
         self._arms = list(arms)
         if len(set(self._arms)) != len(self._arms):
@@ -40,7 +44,15 @@ class CMABPolicy:
         self._epsilon_decay = float(epsilon_decay)
         self._min_epsilon = float(min_epsilon)
         self._replay_window = max(1, int(replay_window))
-        self.enable_pairwise_residual_rf = bool(enable_pairwise_residual_rf)
+        self.enable_cut_fpt_cross_feature = bool(enable_cut_fpt_cross_feature)
+        self._cut_fpt_pair_to_index = {
+            pair: index for index, pair in enumerate(self.CUT_FPT_PAIRS)
+        }
+        if self.enable_cut_fpt_cross_feature:
+            # Validate the complete catalog before training starts so every
+            # replica uses the same supported pair set and column ordering.
+            for arm in self._arms:
+                self._cut_fpt_cross_vector(arm)
         
         self._rf = RandomForestRegressor(
             n_estimators=n_estimators,
@@ -50,29 +62,11 @@ class CMABPolicy:
             verbose=2,
             random_state=self._random_state,
         )
-        # Optional low-capacity correction model. Its input is the current
-        # state plus cut_condition_type and fast_path_timeout. The legacy
-        # global-only path remains unchanged while the feature is disabled.
-        self._pair_rf = None
-        if self.enable_pairwise_residual_rf:
-            self._pair_rf = RandomForestRegressor(
-                n_estimators=20,
-                max_depth=3,
-                min_samples_leaf=4,
-                bootstrap=True,
-                verbose=0,
-                random_state=self._random_state + 1,
-            )
-        
         self._is_fitted = False
         self._update_count = 0
         self._X = []
         self._y = []
-        self._pair_X = []
-        self._pair_y = []
-        self._pair_start_index = 0
-        self._pair_rf_is_fitted = False
-        
+
         self.arm_counts = {arm: 0 for arm in arms}
         self.uses_context = uses_context
         self._monitor_topk = 5
@@ -138,10 +132,15 @@ class CMABPolicy:
             return np.asarray(values, dtype=np.float32)
         return np.asarray(arm, dtype=np.float32).flatten()
 
-    def _feature_row(self, context, arm):
-        """将 context 和 arm 组合成特征向量"""
-        # 假设 context 是一个 list/ndarray，arm 是一个数值或向量
+    def _arm_feature_vector(self, arm) -> np.ndarray:
         arm_vec = self._arm_to_vector(arm)
+        if self.enable_cut_fpt_cross_feature:
+            arm_vec = np.concatenate([arm_vec, self._cut_fpt_cross_vector(arm)])
+        return arm_vec
+
+    def _feature_row(self, context, arm):
+        """将 context 和 arm 组合成特征向量。"""
+        arm_vec = self._arm_feature_vector(arm)
         if self._uses_context:
             ctx_vec = np.array(context).flatten()
             return np.concatenate([ctx_vec, arm_vec])
@@ -151,7 +150,7 @@ class CMABPolicy:
     def _arm_values(arm) -> dict[str, float]:
         if not isinstance(arm, str) or "=" not in arm:
             raise ValueError(
-                "Pairwise residual RF requires named CMAB arms, got "
+                "Cut-FPT cross feature requires named CMAB arms, got "
                 f"{arm!r}"
             )
         values = {}
@@ -160,26 +159,23 @@ class CMABPolicy:
             values[key] = float(value)
         return values
 
-    def _pair_feature_row(self, context, arm) -> np.ndarray:
-        if context is None:
-            raise ValueError("Pairwise residual RF requires a state context")
-        state = np.asarray(context, dtype=np.float32).flatten()
+    def _cut_fpt_cross_vector(self, arm) -> np.ndarray:
         values = self._arm_values(arm)
         try:
-            pair = np.asarray(
-                [values[key] for key in self.PAIRWISE_RESIDUAL_KEYS],
-                dtype=np.float32,
-            )
+            pair = tuple(values[key] for key in self.CUT_FPT_KEYS)
         except KeyError as error:
             raise ValueError(
-                f"CMAB arm is missing pairwise parameter {error.args[0]!r}: {arm!r}"
+                f"CMAB arm is missing crossed parameter {error.args[0]!r}: {arm!r}"
             ) from error
-        return np.concatenate([state, pair])
-
-    def _pair_feature_matrix(self, context, arms) -> np.ndarray:
-        return np.asarray(
-            [self._pair_feature_row(context, arm) for arm in arms]
-        )
+        try:
+            index = self._cut_fpt_pair_to_index[pair]
+        except KeyError as error:
+            raise ValueError(
+                f"Unsupported cut_condition_type/fast_path_timeout pair {pair!r}"
+            ) from error
+        cross = np.zeros(len(self.CUT_FPT_PAIRS), dtype=np.float32)
+        cross[index] = 1.0
+        return cross
 
     def _feature_matrix(self, context, arms=None):
         """为候选 arm 构建特征矩阵，用于一次性预测。"""
@@ -192,7 +188,7 @@ class CMABPolicy:
         if not self._X:
             return window_counts, 0
 
-        arm_vectors = {arm: self._arm_to_vector(arm) for arm in self._arms}
+        arm_vectors = {arm: self._arm_feature_vector(arm) for arm in self._arms}
         recent_features = self._X[-self._replay_window:]
         matched_rows = 0
 
@@ -276,26 +272,6 @@ class CMABPolicy:
 
         mean = all_preds.mean(axis=0)
         std = all_preds.std(axis=0)
-        global_mean = mean.copy()
-        if (
-            self.enable_pairwise_residual_rf
-            and self._pair_rf is not None
-            and self._pair_rf_is_fitted
-        ):
-            pair_features = self._pair_feature_matrix(context, candidates)
-            pair_preds = np.stack(
-                [tree.predict(pair_features) for tree in self._pair_rf.estimators_]
-            )
-            pair_mean = pair_preds.mean(axis=0)
-            mean = global_mean + pair_mean
-            logger.info(
-                "PAIRWISE_RESIDUAL_INFERENCE pair=%s global_top=%.6f "
-                "pair_at_global_top=%.6f final_top=%.6f",
-                "x".join(self.PAIRWISE_RESIDUAL_KEYS),
-                float(global_mean.max()),
-                float(pair_mean[int(np.argmax(global_mean))]),
-                float(mean.max()),
-            )
 
         def _fmt_list(values, idxs):
             return "[" + ", ".join(f"{values[i]:.6f}" for i in idxs) + "]"
@@ -358,11 +334,6 @@ class CMABPolicy:
                 )
                 continue
             feature_row = self._feature_row(context, arm)
-            if self.enable_pairwise_residual_rf:
-                # Store the raw pairwise feature only. Residual targets are
-                # regenerated after every Global RF fit so they always match
-                # the current Global RF instead of a mixture of old models.
-                self._pair_X.append(self._pair_feature_row(context, arm))
             self._X.append(feature_row)
             self._y.append(float(reward))
             self.arm_counts[arm] += 1
@@ -405,57 +376,6 @@ class CMABPolicy:
             self._is_fitted = True
             global_predictions = self._rf.predict(X)
 
-            if (
-                self.enable_pairwise_residual_rf
-                and self._pair_rf is not None
-                and self._pair_X
-            ):
-                pair_X = np.asarray(self._pair_X)
-                pair_global_X = X[self._pair_start_index:]
-                pair_base_y = y[self._pair_start_index:]
-                if len(pair_X) != len(pair_base_y):
-                    raise ValueError(
-                        "Pairwise feature history is not aligned with Global RF "
-                        f"training history: pair={len(pair_X)} "
-                        f"global_since_pair_start={len(pair_base_y)}"
-                    )
-                # Recompute every stored target against the newly fitted Global
-                # RF. Only the replay suffix is used for Pairwise RF training.
-                pair_y = pair_base_y - self._rf.predict(pair_global_X)
-                self._pair_y = pair_y.astype(float).tolist()
-                pair_replay_length = min(len(pair_y), self._replay_window)
-                pair_bootstrapped_idx = self._bootstrap_indices(
-                    pair_replay_length,
-                    shared_seed_hex,
-                    label="pair_outer_bootstrap",
-                )
-                pair_training_X = pair_X[-pair_replay_length:][pair_bootstrapped_idx, :]
-                pair_training_y = pair_y[-pair_replay_length:][pair_bootstrapped_idx]
-                self._pair_rf.fit(pair_training_X, pair_training_y)
-                self._pair_rf_is_fitted = True
-                pair_window_X = pair_X[-pair_replay_length:]
-                pair_window_y = pair_y[-pair_replay_length:]
-                pair_mse = float(
-                    np.mean(
-                        (self._pair_rf.predict(pair_window_X) - pair_window_y) ** 2
-                    )
-                )
-                logger.info(
-                    "PAIRWISE_RESIDUAL_RF_UPDATED samples=%d replay=%d "
-                    "bootstrap=%d feature_dim=%d feature_schema=%s "
-                    "target_schema=%s residual_mean=%.6f "
-                    "residual_abs_mean=%.6f mse=%.6f",
-                    len(pair_y),
-                    pair_replay_length,
-                    len(pair_bootstrapped_idx),
-                    int(pair_X.shape[1]),
-                    self.PAIRWISE_FEATURE_SCHEMA,
-                    self.PAIRWISE_TARGET_SCHEMA,
-                    float(np.mean(pair_window_y)),
-                    float(np.mean(np.abs(pair_window_y))),
-                    pair_mse,
-                )
-
             mse = np.mean((global_predictions - y)**2)
             logger.info(
                 "RF Updated: samples=%d, replay=%d, bootstrap=%d, MSE=%.6f",
@@ -471,14 +391,9 @@ class CMABPolicy:
             'is_fitted': self._is_fitted,
             'update_count': self._update_count,
             'arms': list(self._arms),
-            'enable_pairwise_residual_rf': self.enable_pairwise_residual_rf,
-            'pair_feature_schema': self.PAIRWISE_FEATURE_SCHEMA,
-            'pair_target_schema': self.PAIRWISE_TARGET_SCHEMA,
-            'pair_rf': self._pair_rf,
-            'pair_X': self._pair_X,
-            'pair_y': self._pair_y,
-            'pair_start_index': self._pair_start_index,
-            'pair_rf_is_fitted': self._pair_rf_is_fitted,
+            'enable_cut_fpt_cross_feature': self.enable_cut_fpt_cross_feature,
+            'cut_fpt_cross_schema': self.CUT_FPT_CROSS_SCHEMA,
+            'cut_fpt_pairs': self.CUT_FPT_PAIRS,
         }, path)
 
     def load(self, path):
@@ -490,42 +405,26 @@ class CMABPolicy:
             and tuple(checkpoint_arms) != tuple(self._arms)
         ):
             raise ValueError("CMAB checkpoint arm catalog does not match current arms")
+        checkpoint_cross_enabled = bool(
+            data.get('enable_cut_fpt_cross_feature', False)
+        )
+        if checkpoint_cross_enabled != self.enable_cut_fpt_cross_feature:
+            raise ValueError(
+                "CMAB checkpoint Cut-FPT cross-feature setting does not match "
+                f"the current configuration (checkpoint={checkpoint_cross_enabled}, "
+                f"configured={self.enable_cut_fpt_cross_feature})"
+            )
+        if checkpoint_cross_enabled:
+            if data.get('cut_fpt_cross_schema') != self.CUT_FPT_CROSS_SCHEMA:
+                raise ValueError("CMAB checkpoint Cut-FPT cross-feature schema mismatch")
+            checkpoint_pairs = tuple(
+                tuple(pair) for pair in data.get('cut_fpt_pairs', ())
+            )
+            if checkpoint_pairs != self.CUT_FPT_PAIRS:
+                raise ValueError("CMAB checkpoint Cut-FPT pair catalog mismatch")
+
         self._rf = data['rf']
         self._X = data['X']
         self._y = data['y']
         self._is_fitted = data['is_fitted']
         self._update_count = data['update_count']
-        if self.enable_pairwise_residual_rf and data.get(
-            'enable_pairwise_residual_rf', False
-        ):
-            checkpoint_pair_schema = data.get('pair_feature_schema')
-            if checkpoint_pair_schema != self.PAIRWISE_FEATURE_SCHEMA:
-                raise ValueError(
-                    "CMAB pairwise checkpoint feature schema mismatch: "
-                    f"checkpoint={checkpoint_pair_schema!r}, "
-                    f"configured={self.PAIRWISE_FEATURE_SCHEMA!r}. "
-                    "Old cut+timeout checkpoints cannot initialize the "
-                    "state+cut+timeout pairwise RF."
-                )
-            checkpoint_target_schema = data.get('pair_target_schema')
-            if checkpoint_target_schema != self.PAIRWISE_TARGET_SCHEMA:
-                raise ValueError(
-                    "CMAB pairwise checkpoint target schema mismatch: "
-                    f"checkpoint={checkpoint_target_schema!r}, "
-                    f"configured={self.PAIRWISE_TARGET_SCHEMA!r}. "
-                    "Checkpoints containing pre-update residual targets cannot "
-                    "initialize the current-Global-RF residual model."
-                )
-            self._pair_rf = data['pair_rf']
-            self._pair_X = data.get('pair_X', [])
-            self._pair_y = data.get('pair_y', [])
-            self._pair_start_index = int(
-                data.get('pair_start_index', len(self._y) - len(self._pair_X))
-            )
-            self._pair_rf_is_fitted = data.get('pair_rf_is_fitted', False)
-        elif self.enable_pairwise_residual_rf:
-            self._pair_start_index = len(self._y)
-            logger.info(
-                "Loaded global-only CMAB checkpoint; pairwise residual RF "
-                "will start from the next valid sample"
-            )

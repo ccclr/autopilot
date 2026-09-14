@@ -32,7 +32,7 @@ class CMABConfigTests(TestCase):
         parameters = BenchParameters(_parameters())
 
         self.assertEqual(parameters.cmab_seed, 0)
-        self.assertFalse(parameters.enable_cmab_pairwise_residual_rf)
+        self.assertFalse(parameters.enable_cmab_cut_fpt_cross_feature)
 
     def test_accepts_non_negative_cmab_seed(self):
         parameters = BenchParameters(_parameters(cmab_seed=17))
@@ -43,19 +43,19 @@ class CMABConfigTests(TestCase):
         with self.assertRaisesRegex(ConfigError, 'cmab_seed'):
             BenchParameters(_parameters(cmab_seed=-1))
 
-    def test_accepts_pairwise_residual_rf_switch(self):
+    def test_accepts_cut_fpt_cross_feature_switch(self):
         parameters = BenchParameters(
-            _parameters(enable_cmab_pairwise_residual_rf=True)
+            _parameters(enable_cmab_cut_fpt_cross_feature=True)
         )
 
-        self.assertTrue(parameters.enable_cmab_pairwise_residual_rf)
+        self.assertTrue(parameters.enable_cmab_cut_fpt_cross_feature)
 
-    def test_rejects_non_boolean_pairwise_residual_rf_switch(self):
+    def test_rejects_non_boolean_cut_fpt_cross_feature_switch(self):
         with self.assertRaisesRegex(
-            ConfigError, 'enable_cmab_pairwise_residual_rf'
+            ConfigError, 'enable_cmab_cut_fpt_cross_feature'
         ):
             BenchParameters(
-                _parameters(enable_cmab_pairwise_residual_rf='yes')
+                _parameters(enable_cmab_cut_fpt_cross_feature='yes')
             )
 
     def test_controller_command_contains_cmab_options(self):
@@ -66,13 +66,13 @@ class CMABConfigTests(TestCase):
             parameters_file='/local/.parameters.json',
             rl_algo='cmab',
             cmab_seed=17,
-            enable_cmab_pairwise_residual_rf=True,
+            enable_cmab_cut_fpt_cross_feature=True,
         )
 
         self.assertIn('--cmab-seed 17', command)
-        self.assertIn('--enable-cmab-pairwise-residual-rf', command)
+        self.assertIn('--enable-cmab-cut-fpt-cross-feature', command)
 
-    def test_controller_command_omits_pairwise_switch_by_default(self):
+    def test_controller_command_omits_cross_feature_switch_by_default(self):
         command = CommandMaker.run_controller(
             node_index=0,
             repo_name='autopilot',
@@ -81,7 +81,7 @@ class CMABConfigTests(TestCase):
             rl_algo='cmab',
         )
 
-        self.assertNotIn('--enable-cmab-pairwise-residual-rf', command)
+        self.assertNotIn('--enable-cmab-cut-fpt-cross-feature', command)
 
 
 if __name__ == '__main__':
