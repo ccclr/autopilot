@@ -111,6 +111,25 @@ class CMABTrainer:
             )
             reward_epoch = self._get_epoch_from_metrics_file(next_metrics)
             if reward > 15 or reward == 0:
+                # The action audit is independent of whether this reward can
+                # be used for CMAB training or transition export.
+                invalid_abandoned = (
+                    reward_epoch is not None
+                    and Path(
+                        f"/tmp/autopilot_rl_param_abandon_{reward_epoch-1}.signal"
+                    ).exists()
+                )
+                invalid_effective_arm = (
+                    last_arm if invalid_abandoned
+                    else action_by_epoch.get(reward_epoch, arm)
+                )
+                self._record_epoch_action_best_effort(
+                    current_epoch=current_epoch,
+                    reward_epoch=reward_epoch,
+                    selected_arm=arm,
+                    effective_arm=invalid_effective_arm,
+                    abandoned=invalid_abandoned,
+                )
                 logger.warning(
                     "Dropping sample due to suspicious high reward (>10): reward=%.6f metrics=%s",
                     reward,
@@ -204,8 +223,15 @@ class CMABTrainer:
                 logger.info("Saved checkpoint: %s", checkpoint_path)
 
             self.last_metrics_file = next_metrics
-            # Export is deliberately last and fail-open: all CMAB state,
-            # checkpoint work for this iteration is complete.
+            # Both exports are deliberately last and fail-open: neither may
+            # change CMAB's action selection, reward attribution or training.
+            self._record_epoch_action_best_effort(
+                current_epoch=current_epoch,
+                reward_epoch=reward_epoch,
+                selected_arm=arm,
+                effective_arm=last_arm if abandoned else use_arm,
+                abandoned=abandoned,
+            )
             self._export_transition_best_effort(
                 current_epoch=current_epoch,
                 reward_epoch=reward_epoch,
@@ -229,6 +255,32 @@ class CMABTrainer:
             except OSError:
                 pass
             self._param_socket = None
+
+    def _record_epoch_action_best_effort(
+        self,
+        *,
+        current_epoch: Optional[int],
+        reward_epoch: Optional[int],
+        selected_arm: str,
+        effective_arm: Optional[str],
+        abandoned: bool,
+    ) -> None:
+        writer = self.transition_writer
+        if writer is None or current_epoch is None or reward_epoch is None:
+            return
+        try:
+            writer.write_epoch_action(
+                source_epoch=current_epoch,
+                reward_epoch=reward_epoch,
+                selected_arm=selected_arm,
+                effective_arm=effective_arm,
+                abandoned=abandoned,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to record CMAB epoch action; CMAB will continue"
+            )
+            self._close_transition_writer()
 
     def _export_transition_best_effort(
         self,

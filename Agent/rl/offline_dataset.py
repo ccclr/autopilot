@@ -61,6 +61,7 @@ class TransitionDatasetWriter:
         node_index: int,
         behavior_policy: str = "cmab",
         metadata: dict | None = None,
+        enable_epoch_actions: bool = False,
     ) -> None:
         if node_index != 0:
             raise ValueError("offline transition export is owned by node0")
@@ -97,8 +98,17 @@ class TransitionDatasetWriter:
 
         self.run_dir = run_dir
         self.transition_path = run_dir / "transitions.jsonl"
+        self.epoch_action_path = (
+            run_dir / "epoch_actions.jsonl" if enable_epoch_actions else None
+        )
         self.manifest_path = run_dir / "meta.json"
         self._handle = self.transition_path.open("x", encoding="utf-8", buffering=1)
+        self._epoch_action_handle = (
+            self.epoch_action_path.open("x", encoding="utf-8", buffering=1)
+            if self.epoch_action_path is not None
+            else None
+        )
+        self._written_action_epochs: set[int] = set()
 
         catalog_payload = json.dumps(
             self.arms, ensure_ascii=True, separators=(",", ":")
@@ -117,6 +127,8 @@ class TransitionDatasetWriter:
             "arms": list(self.arms),
             "metadata": metadata or {},
         }
+        if self.epoch_action_path is not None:
+            manifest["epoch_action_file"] = self.epoch_action_path.name
         temporary = self.manifest_path.with_suffix(".json.tmp")
         with temporary.open("x", encoding="utf-8") as handle:
             json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
@@ -179,9 +191,61 @@ class TransitionDatasetWriter:
         self._written_keys.add(key)
         return True
 
+    def write_epoch_action(
+        self,
+        *,
+        source_epoch: int,
+        reward_epoch: int,
+        selected_arm: str,
+        effective_arm: str | None,
+        abandoned: bool,
+    ) -> bool:
+        """Record the arm credited to an observed epoch, even when abandoned.
+
+        This is an audit record, not an offline-training transition. The
+        effective arm follows CMAB's existing abandon attribution logic.
+        """
+        epoch = int(reward_epoch)
+        if self._epoch_action_handle is None:
+            return False
+        if epoch in self._written_action_epochs:
+            return False
+        if selected_arm not in self._action_ids or (
+            effective_arm is not None
+            and effective_arm not in self._action_ids
+        ):
+            raise ValueError("epoch action contains an unknown arm")
+        status = (
+            "abandoned_effective_unknown" if effective_arm is None
+            else "abandoned_reused_previous" if abandoned else "applied"
+        )
+        record = {
+            "schema_version": 1,
+            "environment": self.environment,
+            "run_id": self.run_id,
+            "source_epoch": int(source_epoch),
+            "epoch": epoch,
+            "selected_arm": selected_arm,
+            "selected_action_id": self._action_ids[selected_arm],
+            "effective_arm": effective_arm,
+            "effective_action_id": (
+                self._action_ids[effective_arm] if effective_arm is not None else None
+            ),
+            "status": status,
+        }
+        self._epoch_action_handle.write(
+            json.dumps(record, ensure_ascii=True, separators=(",", ":")) + "\n"
+        )
+        self._epoch_action_handle.flush()
+        os.fsync(self._epoch_action_handle.fileno())
+        self._written_action_epochs.add(epoch)
+        return True
+
     def close(self) -> None:
         if not self._handle.closed:
             self._handle.close()
+        if self._epoch_action_handle is not None and not self._epoch_action_handle.closed:
+            self._epoch_action_handle.close()
 
 
 class AsyncTransitionDatasetWriter:
@@ -204,6 +268,7 @@ class AsyncTransitionDatasetWriter:
         node_index: int,
         behavior_policy: str = "cmab",
         metadata: dict | None = None,
+        enable_epoch_actions: bool = False,
         queue_capacity: int = 256,
     ) -> None:
         if queue_capacity <= 0:
@@ -216,11 +281,13 @@ class AsyncTransitionDatasetWriter:
             node_index=node_index,
             behavior_policy=behavior_policy,
             metadata=metadata,
+            enable_epoch_actions=enable_epoch_actions,
         )
         self.environment = self._writer.environment
         self.run_id = self._writer.run_id
         self.run_dir = self._writer.run_dir
         self.transition_path = self._writer.transition_path
+        self.epoch_action_path = self._writer.epoch_action_path
         self.manifest_path = self._writer.manifest_path
         self._queue: queue.Queue[object] = queue.Queue(maxsize=queue_capacity)
         self._closed = threading.Event()
@@ -257,6 +324,7 @@ class AsyncTransitionDatasetWriter:
             return False
         # Copy mutable inputs before returning control to the CMAB loop.
         payload = {
+            "kind": "transition",
             "source_epoch": int(source_epoch),
             "reward_epoch": int(reward_epoch),
             "state": np.asarray(state, dtype=np.float32).reshape(-1).copy(),
@@ -281,6 +349,41 @@ class AsyncTransitionDatasetWriter:
             return False
         return True
 
+    def write_epoch_action(
+        self,
+        *,
+        source_epoch: int,
+        reward_epoch: int,
+        selected_arm: str,
+        effective_arm: str | None,
+        abandoned: bool,
+    ) -> bool:
+        if (
+            self.epoch_action_path is None
+            or self._closed.is_set()
+            or self._failed.is_set()
+        ):
+            return False
+        payload = {
+            "kind": "epoch_action",
+            "source_epoch": int(source_epoch),
+            "reward_epoch": int(reward_epoch),
+            "selected_arm": str(selected_arm),
+            "effective_arm": (
+                str(effective_arm) if effective_arm is not None else None
+            ),
+            "abandoned": bool(abandoned),
+        }
+        try:
+            self._queue.put_nowait(payload)
+        except queue.Full:
+            logger.warning(
+                "CMAB_EPOCH_ACTION_DROPPED reason=queue_full "
+                "run=%s epoch=%s", self.run_id, reward_epoch
+            )
+            return False
+        return True
+
     def _run(self) -> None:
         try:
             while True:
@@ -291,8 +394,28 @@ class AsyncTransitionDatasetWriter:
                     if self._failed.is_set():
                         continue
                     assert isinstance(payload, dict)
-                    exported = self._writer.write(**payload)
-                    if exported:
+                    kind = payload.pop("kind")
+                    if kind == "epoch_action":
+                        recorded = self._writer.write_epoch_action(**payload)
+                        if recorded:
+                            logger.info(
+                                "CMAB_EPOCH_ACTION_RECORDED run=%s epoch=%d "
+                                "status=%s path=%s",
+                                self.run_id,
+                                payload["reward_epoch"],
+                                (
+                                    "abandoned_effective_unknown"
+                                    if payload["effective_arm"] is None
+                                    else "abandoned_reused_previous"
+                                    if payload["abandoned"]
+                                    else "applied"
+                                ),
+                                self.epoch_action_path,
+                            )
+                    elif kind == "transition":
+                        exported = self._writer.write(**payload)
+                        if not exported:
+                            continue
                         logger.info(
                             "CMAB_OFFLINE_TRANSITION_EXPORTED run=%s "
                             "source_epoch=%d reward_epoch=%d arm=%s reward=%.6f "
@@ -304,6 +427,8 @@ class AsyncTransitionDatasetWriter:
                             payload["reward"],
                             self.transition_path,
                         )
+                    else:
+                        raise ValueError(f"unknown dataset record kind: {kind}")
                 except Exception as error:
                     self._failure = error
                     self._failed.set()

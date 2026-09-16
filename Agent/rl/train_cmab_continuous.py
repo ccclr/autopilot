@@ -101,6 +101,7 @@ def main():
                 run_id=args.run_id or "",
                 arms=arms,
                 node_index=args.node_index,
+                enable_epoch_actions=True,
                 metadata={
                     "policy": args.policy,
                     "seed": args.seed,

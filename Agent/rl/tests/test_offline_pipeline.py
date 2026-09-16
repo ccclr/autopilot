@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
@@ -103,6 +104,85 @@ class OfflineDatasetTests(unittest.TestCase):
             records = load_transition_files([path])
             self.assertEqual(len(records), 1)
 
+    def test_epoch_actions_include_abandon_without_creating_a_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            writer = TransitionDatasetWriter(
+                root_dir=directory,
+                environment="A",
+                run_id="action-run",
+                arms=ARMS,
+                node_index=0,
+                enable_epoch_actions=True,
+            )
+            self.assertTrue(writer.write_epoch_action(
+                source_epoch=0,
+                reward_epoch=1,
+                selected_arm=ARMS[0],
+                effective_arm=ARMS[0],
+                abandoned=False,
+            ))
+            self.assertTrue(writer.write_epoch_action(
+                source_epoch=1,
+                reward_epoch=2,
+                selected_arm=ARMS[1],
+                effective_arm=ARMS[0],
+                abandoned=True,
+            ))
+            self.assertFalse(writer.write_epoch_action(
+                source_epoch=1,
+                reward_epoch=2,
+                selected_arm=ARMS[1],
+                effective_arm=ARMS[0],
+                abandoned=True,
+            ))
+            self.assertTrue(writer.write_epoch_action(
+                source_epoch=2,
+                reward_epoch=3,
+                selected_arm=ARMS[1],
+                effective_arm=None,
+                abandoned=True,
+            ))
+            writer.close()
+
+            actions = [
+                json.loads(line)
+                for line in writer.epoch_action_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(actions), 3)
+            self.assertEqual(actions[0]["status"], "applied")
+            self.assertEqual(actions[1]["epoch"], 2)
+            self.assertEqual(actions[1]["selected_action_id"], 1)
+            self.assertEqual(actions[1]["effective_action_id"], 0)
+            self.assertEqual(actions[1]["status"], "abandoned_reused_previous")
+            self.assertEqual(actions[2]["status"], "abandoned_effective_unknown")
+            self.assertIsNone(actions[2]["effective_action_id"])
+            self.assertEqual(writer.transition_path.read_text(encoding="utf-8"), "")
+
+    def test_async_epoch_action_is_flushed_on_close(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            writer = AsyncTransitionDatasetWriter(
+                root_dir=directory,
+                environment="A",
+                run_id="async-action-run",
+                arms=ARMS,
+                node_index=0,
+                enable_epoch_actions=True,
+            )
+            self.assertTrue(writer.write_epoch_action(
+                source_epoch=4,
+                reward_epoch=5,
+                selected_arm=ARMS[1],
+                effective_arm=ARMS[0],
+                abandoned=True,
+            ))
+            writer.close()
+            actions = [
+                json.loads(line)
+                for line in writer.epoch_action_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(actions), 1)
+            self.assertEqual(actions[0]["effective_action_id"], 0)
+
     def test_existing_cmab_writer_keeps_cmab_behavior_policy_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self._write_run(Path(directory), "A", "cmab-run")
@@ -113,6 +193,8 @@ class OfflineDatasetTests(unittest.TestCase):
 
             self.assertEqual(record["behavior_policy"], "cmab")
             self.assertEqual(manifest["behavior_policy"], "cmab")
+            self.assertNotIn("epoch_action_file", manifest)
+            self.assertFalse((path.parent / "epoch_actions.jsonl").exists())
 
     def test_async_writer_failure_does_not_propagate_to_cmab_caller(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -201,6 +283,86 @@ class DQNCheckpointTests(unittest.TestCase):
 
 
 class CMABExportIsolationTests(unittest.TestCase):
+    def test_abandoned_epoch_records_reused_action_without_transition(self) -> None:
+        class FakePolicy:
+            policy_name = "test"
+            uses_context = True
+
+            def __init__(self) -> None:
+                self.selected = iter(ARMS)
+                self.updated = []
+
+            def select_arm(self, _context, shared_seed_hex=None):
+                return next(self.selected)
+
+            def update(self, arms, rewards, contexts, shared_seed_hex=None):
+                self.updated.append(arms[0])
+
+        class FakeCatalog:
+            @staticmethod
+            def decode_arm(arm):
+                return {"arm": arm}
+
+        class RecordingWriter:
+            def __init__(self) -> None:
+                self.actions = []
+                self.transitions = []
+
+            def write_epoch_action(self, **record):
+                self.actions.append(record)
+                return True
+
+            def write(self, **record):
+                self.transitions.append(record)
+                return True
+
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = [root / f"global_state_epoch_{epoch}.json" for epoch in range(3)]
+            for epoch, path in enumerate(files):
+                path.write_text(json.dumps({"global_reward": 1.0 + epoch}), encoding="utf-8")
+            policy = FakePolicy()
+            writer = RecordingWriter()
+            trainer = CMABTrainer(
+                metrics_dir=str(root),
+                parameters_file=str(root / "parameters.json"),
+                checkpoint_dir=str(root / "checkpoints"),
+                policy=policy,
+                context_builder=object(),
+                arm_catalog=FakeCatalog(),
+                warmup_iterations=0,
+                transition_writer=writer,
+            )
+            trainer._connect_param_socket = lambda: None
+            trainer._get_latest_metrics_file = lambda: files[0]
+            trainer._load_initial_arm_from_parameters_file = lambda: ARMS[0]
+            trainer._write_parameters_to_file = lambda _params, _epoch: None
+            next_files = iter(files[1:])
+            trainer._wait_for_new_metrics_file = lambda _last, timeout: next(next_files)
+            trainer._build_context_from_global_state = lambda _path: np.asarray([1.0])
+            trainer._build_context_from_data = lambda _data: np.asarray([1.0])
+            trainer._compute_shared_seed_hex = lambda _path: "00"
+            original_exists = Path.exists
+
+            def signal_exists(path):
+                return (
+                    path.name == "autopilot_rl_param_abandon_1.signal"
+                    or original_exists(path)
+                )
+
+            with mock.patch.object(Path, "exists", signal_exists):
+                trainer.run(num_iterations=2, checkpoint_freq=10)
+
+            self.assertEqual(policy.updated, [ARMS[0], ARMS[0]])
+            self.assertEqual(len(writer.transitions), 1)
+            self.assertEqual(writer.actions[0]["selected_arm"], ARMS[0])
+            self.assertEqual(writer.actions[1]["selected_arm"], ARMS[1])
+            self.assertEqual(writer.actions[1]["effective_arm"], ARMS[0])
+            self.assertTrue(writer.actions[1]["abandoned"])
+
     def test_export_failure_cannot_undo_or_stop_cmab_iteration(self) -> None:
         arm = ARMS[0]
 
@@ -237,6 +399,9 @@ class CMABExportIsolationTests(unittest.TestCase):
             def write(self, **_kwargs):
                 self.write_calls += 1
                 raise OSError("simulated exporter failure")
+
+            def write_epoch_action(self, **_kwargs):
+                return True
 
             def close(self):
                 self.close_calls += 1
