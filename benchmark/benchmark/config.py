@@ -249,7 +249,38 @@ class BenchParameters:
 
             self.tx_size = int(json['tx_size'])
 
-            self.duration = int(json['duration'])
+            # A benchmark can stop either after a wall-clock duration or after
+            # node0 has produced a target protocol epoch.  Keeping `epochs`
+            # optional preserves every existing duration-based configuration.
+            raw_duration = json.get('duration', None)
+            raw_epochs = json.get('epochs', None)
+            if raw_duration == '' or raw_duration is False:
+                raw_duration = None
+            if raw_epochs == '' or raw_epochs is False:
+                raw_epochs = None
+            if (raw_duration is None) == (raw_epochs is None):
+                raise ConfigError(
+                    'configure exactly one benchmark stop condition: '
+                    'a positive duration or a positive epochs value'
+                )
+
+            if raw_duration is None:
+                self.duration = None
+            else:
+                if isinstance(raw_duration, bool):
+                    raise ConfigError('duration must be a positive integer or null')
+                self.duration = int(raw_duration)
+                if self.duration <= 0:
+                    raise ConfigError('duration must be a positive integer or null')
+
+            if raw_epochs is None:
+                self.epochs = None
+            else:
+                if isinstance(raw_epochs, bool):
+                    raise ConfigError('epochs must be a positive integer or null')
+                self.epochs = int(raw_epochs)
+                if self.epochs <= 0:
+                    raise ConfigError('epochs must be a positive integer or null')
 
             self.runs = int(json['runs']) if 'runs' in json else 1
 

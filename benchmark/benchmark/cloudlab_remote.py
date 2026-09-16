@@ -1205,11 +1205,101 @@ class CloudLabBench:
                 log_file = PathMaker.client_log_file(i, id)
                 self._background_run(host, cmd, log_file)
         
-        # Wait for all transactions to be processed.
-        duration = bench_parameters.duration
-        for i in progress_bar(range(20), prefix=f'Running benchmark ({duration} sec):'):
-            sleep(ceil(duration / 20))
+        # Wait for the selected stop condition. Epoch 0 is the bootstrap
+        # observation, so epochs=100 stops after the metrics collector writes
+        # the measured epochs 1..100.
+        if bench_parameters.epochs is not None:
+            self._wait_for_target_epoch(
+                committee,
+                faults,
+                bench_parameters.epochs,
+            )
+        else:
+            duration = bench_parameters.duration
+            for _ in progress_bar(
+                range(20), prefix=f'Running benchmark ({duration} sec):'
+            ):
+                sleep(ceil(duration / 20))
         self.kill(hosts=hosts, delete_logs=False)
+
+    @staticmethod
+    def _latest_completed_epoch(file_names):
+        """Return the largest metrics epoch in a file listing."""
+        epochs = []
+        for file_name in file_names:
+            match = re.fullmatch(r'epoch_(\d+)_slot_\d+\.json', file_name)
+            if match:
+                epochs.append(int(match.group(1)))
+        return max(epochs) if epochs else None
+
+    def _wait_for_target_epoch(
+        self,
+        committee,
+        faults,
+        target_epoch,
+        poll_interval=1.0,
+    ):
+        """Wait until node0 writes a readable metrics file for the target."""
+        primary_addresses = committee.primary_addresses(faults)
+        if not primary_addresses:
+            raise BenchError(
+                'Cannot monitor epoch-based benchmark',
+                ValueError('node0 primary is unavailable'),
+            )
+
+        host = Committee.ip(primary_addresses[0])
+        metrics_dir = f'{self.home}/metrics-0'
+        command = (
+            f'find {shlex.quote(metrics_dir)} -maxdepth 1 -type f '
+            "-name 'epoch_*_slot_*.json' -printf '%f\\n'"
+        )
+        connection = Connection(
+            host,
+            user=self.settings.username,
+            connect_kwargs=self.connect,
+        )
+        last_reported = None
+        Print.info(
+            f'Running benchmark until node0 completes epoch {target_epoch} '
+            f'(measured epochs 1..{target_epoch})...'
+        )
+        try:
+            while True:
+                result = connection.run(command, hide=True, warn=True)
+                file_names = result.stdout.splitlines()
+                latest_epoch = self._latest_completed_epoch(file_names)
+                if latest_epoch != last_reported:
+                    progress = 0 if latest_epoch is None else latest_epoch
+                    Print.info(
+                        f'Epoch progress: {progress}/{target_epoch}'
+                    )
+                    last_reported = latest_epoch
+                if latest_epoch is not None and latest_epoch >= target_epoch:
+                    # The collector writes directly to the final filename.
+                    # Seeing the name alone can race with an in-progress write;
+                    # stop only once the target JSON parses completely.
+                    target_files = [
+                        name for name in file_names
+                        if re.fullmatch(
+                            rf'epoch_{target_epoch}_slot_\d+\.json', name
+                        )
+                    ]
+                    for name in target_files:
+                        file_path = f'{metrics_dir}/{name}'
+                        validation = connection.run(
+                            'python3 -c '
+                            + shlex.quote(
+                                'import json,sys; json.load(open(sys.argv[1]))'
+                            )
+                            + f' {shlex.quote(file_path)}',
+                            hide=True,
+                            warn=True,
+                        )
+                        if validation.ok:
+                            return
+                sleep(poll_interval)
+        finally:
+            connection.close()
 
     def _archive_cmab_metrics(
         self,

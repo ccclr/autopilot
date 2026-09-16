@@ -237,8 +237,10 @@ def remote(ctx, debug=False):
         'collocate': True,
         'rate': [40_000],
         'tx_size': 512,
-        # Standard CMAB data-collection run in the static A environment.
-        'duration': 600,
+        # Configure exactly one stop condition. With epochs=100, epoch 0 is
+        # bootstrap and the run stops after measured epochs 1..100 complete.
+        'duration': None,
+        'epochs': 100,
         'runs': 1,
         # True: create a timestamped txt file for every run instead of
         # appending to an existing result file.

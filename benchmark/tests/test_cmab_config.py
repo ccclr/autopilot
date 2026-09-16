@@ -28,6 +28,30 @@ def _parameters(**overrides):
 
 
 class CMABConfigTests(TestCase):
+    def test_duration_stop_condition_remains_the_default(self):
+        parameters = BenchParameters(_parameters())
+
+        self.assertEqual(parameters.duration, 900)
+        self.assertIsNone(parameters.epochs)
+
+    def test_accepts_epoch_stop_condition(self):
+        parameters = BenchParameters(_parameters(duration=None, epochs=100))
+
+        self.assertIsNone(parameters.duration)
+        self.assertEqual(parameters.epochs, 100)
+
+    def test_rejects_two_stop_conditions(self):
+        with self.assertRaisesRegex(ConfigError, 'exactly one'):
+            BenchParameters(_parameters(epochs=100))
+
+    def test_rejects_missing_stop_condition(self):
+        with self.assertRaisesRegex(ConfigError, 'exactly one'):
+            BenchParameters(_parameters(duration=None))
+
+    def test_rejects_non_positive_epoch_stop_condition(self):
+        with self.assertRaisesRegex(ConfigError, 'epochs'):
+            BenchParameters(_parameters(duration=None, epochs=0))
+
     def test_defaults_preserve_global_rf_configuration(self):
         parameters = BenchParameters(_parameters())
 
