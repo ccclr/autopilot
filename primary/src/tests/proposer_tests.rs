@@ -9,6 +9,18 @@ use crate::{
 };
 use tokio::sync::mpsc::channel;
 
+fn batch_metadata(author: crypto::PublicKey) -> config::BatchMetadata {
+    config::BatchMetadata {
+        author,
+        sample_tx_ids: vec![],
+        sample_tx_timestamps: vec![],
+        sample_tx_sizes: vec![],
+        transaction_count: 1,
+        batch_size: 32,
+        avg_transaction_size: 32,
+    }
+}
+
 #[tokio::test]
 async fn propose_empty() {
     let (name, secret) = keys().pop().unwrap();
@@ -18,6 +30,8 @@ async fn propose_empty() {
     let (_tx_our_digests, rx_our_digests) = channel(1);
     let (tx_headers, mut rx_headers) = channel(1);
     let (_tx_ticket, rx_ticket) = channel(1);
+
+    let (_tx_params, rx_params) = channel(1);
 
     // Spawn the proposer.
     Proposer::spawn(
@@ -30,6 +44,7 @@ async fn propose_empty() {
         /* rx_workers */ rx_our_digests,
         rx_ticket,
         /* tx_core */ tx_headers,
+        rx_params,
     );
 
     let genesis_cert = Certificate::genesis_certs(&committee())
@@ -40,6 +55,9 @@ async fn propose_empty() {
         .send(genesis_cert)
         .await
         .expect("failed to send cert to proposer");
+    // The proposer must consume its genesis parent before we enqueue payload.
+    // Reserving the single-slot channel waits for consumption without a sleep.
+    drop(tx_parents.reserve().await.unwrap());
 
     // Ensure the proposer makes a correct empty header.
     let header = rx_headers.recv().await.unwrap();
@@ -59,6 +77,8 @@ async fn propose_payload() {
     let (tx_headers, mut rx_headers) = channel(1);
     let (_tx_ticket, rx_ticket) = channel(1);
 
+    let (_tx_params, rx_params) = channel(1);
+
     // Spawn the proposer.
     Proposer::spawn(
         name,
@@ -70,6 +90,7 @@ async fn propose_payload() {
         /* rx_workers */ rx_our_digests,
         rx_ticket,
         /* tx_core */ tx_headers,
+        rx_params,
     );
 
     let genesis_cert = Certificate::genesis_certs(&committee())
@@ -80,6 +101,9 @@ async fn propose_payload() {
         .send(genesis_cert)
         .await
         .expect("failed to send cert to proposer");
+    // The proposer must consume its genesis parent before we enqueue payload.
+    // Reserving the single-slot channel waits for consumption without a sleep.
+    drop(tx_parents.reserve().await.unwrap());
 
     sleep(Duration::from_millis(500)).await;
 
@@ -87,7 +111,7 @@ async fn propose_payload() {
     let digest = Digest(name.0);
     let worker_id = 0;
     tx_our_digests
-        .send((digest.clone(), worker_id))
+        .send((digest.clone(), worker_id, batch_metadata(name)))
         .await
         .unwrap();
 
@@ -109,6 +133,8 @@ async fn propose_normal() {
     let (tx_headers, mut rx_headers) = channel(1);
     let (_tx_ticket, rx_ticket) = channel(1);
 
+    let (_tx_params, rx_params) = channel(1);
+
     // Spawn the proposer.
     Proposer::spawn(
         name,
@@ -120,6 +146,7 @@ async fn propose_normal() {
         /* rx_workers */ rx_our_digests,
         rx_ticket,
         /* tx_core */ tx_headers,
+        rx_params,
     );
 
     let genesis_cert = Certificate::genesis_certs(&committee())
@@ -130,12 +157,15 @@ async fn propose_normal() {
         .send(genesis_cert)
         .await
         .expect("failed to send cert to proposer");
+    // The proposer must consume its genesis parent before we enqueue payload.
+    // Reserving the single-slot channel waits for consumption without a sleep.
+    drop(tx_parents.reserve().await.unwrap());
 
     // Send enough digests for the header payload.
     let digest = Digest(name.0);
     let worker_id = 0;
     tx_our_digests
-        .send((digest.clone(), worker_id))
+        .send((digest.clone(), worker_id, batch_metadata(name)))
         .await
         .unwrap();
 
@@ -149,7 +179,7 @@ async fn propose_normal() {
 
     let votes: Vec<_> = keys()
         .iter()
-        .take(1)
+        .take(3)
         .map(|(public_key, secret_key)| {
             Vote::new_from_key(header.clone(), Vec::new(), *public_key, secret_key)
         })
@@ -165,7 +195,7 @@ async fn propose_normal() {
     tx_parents.send(certificate).await.unwrap();
 
     tx_our_digests
-        .send((digest.clone(), worker_id))
+        .send((digest.clone(), worker_id, batch_metadata(name)))
         .await
         .unwrap();
 
@@ -189,6 +219,8 @@ async fn propose_special_ticket_first() {
     let (tx_headers, mut rx_headers) = channel(1);
     let (tx_ticket, rx_ticket) = channel(1);
 
+    let (_tx_params, rx_params) = channel(1);
+
     // Spawn the proposer.
     Proposer::spawn(
         name,
@@ -200,6 +232,7 @@ async fn propose_special_ticket_first() {
         /* rx_workers */ rx_our_digests,
         rx_ticket,
         /* tx_core */ tx_headers,
+        rx_params,
     );
 
     let genesis_cert = Certificate::genesis_certs(&committee())
@@ -210,6 +243,9 @@ async fn propose_special_ticket_first() {
         .send(genesis_cert)
         .await
         .expect("failed to send cert to proposer");
+    // The proposer must consume its genesis parent before we enqueue payload.
+    // Reserving the single-slot channel waits for consumption without a sleep.
+    drop(tx_parents.reserve().await.unwrap());
 
     //Send ticket to form a special header
     let gen_header = Header::genesis(&committee());
@@ -229,7 +265,7 @@ async fn propose_special_ticket_first() {
     let digest = Digest(name.0);
     let worker_id = 0;
     tx_our_digests
-        .send((digest.clone(), worker_id))
+        .send((digest.clone(), worker_id, batch_metadata(name)))
         .await
         .unwrap();
 
@@ -255,6 +291,8 @@ async fn propose_confirm_message() {
     let (tx_headers, mut rx_headers) = channel(1);
     let (tx_ticket, rx_ticket) = channel(1);
 
+    let (_tx_params, rx_params) = channel(1);
+
     // Spawn the proposer.
     Proposer::spawn(
         name,
@@ -266,6 +304,7 @@ async fn propose_confirm_message() {
         /* rx_workers */ rx_our_digests,
         rx_ticket,
         /* tx_core */ tx_headers,
+        rx_params,
     );
 
     let genesis_cert = Certificate::genesis_certs(&committee())
@@ -276,6 +315,9 @@ async fn propose_confirm_message() {
         .send(genesis_cert)
         .await
         .expect("failed to send cert to proposer");
+    // The proposer must consume its genesis parent before we enqueue payload.
+    // Reserving the single-slot channel waits for consumption without a sleep.
+    drop(tx_parents.reserve().await.unwrap());
 
     //Send ticket to form a special header
     let gen_header = Header::genesis(&committee());
@@ -295,7 +337,7 @@ async fn propose_confirm_message() {
     let digest = Digest(name.0);
     let worker_id = 0;
     tx_our_digests
-        .send((digest.clone(), worker_id))
+        .send((digest.clone(), worker_id, batch_metadata(name)))
         .await
         .unwrap();
 

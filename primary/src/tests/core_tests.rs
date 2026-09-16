@@ -15,6 +15,97 @@ use serial_test::serial;
 use std::{fs, time::Duration};
 use tokio::{sync::mpsc::channel, time::sleep};
 
+/// Keep protocol tests focused on their scenario while supplying the optional
+/// simulation and metrics channels required by the current Core interface.
+#[allow(clippy::too_many_arguments)]
+fn spawn_test_core(
+    name: PublicKey,
+    committee: Committee,
+    store: Store,
+    synchronizer: Synchronizer,
+    signature_service: SignatureService,
+    consensus_round: Arc<AtomicU64>,
+    gc_depth: Height,
+    rx_primaries: Receiver<PrimaryMessage>,
+    rx_header_waiter: Receiver<Header>,
+    rx_header_waiter_instances: Receiver<(ConsensusMessage, Header)>,
+    rx_proposer: Receiver<Header>,
+    tx_committer: Sender<(ConsensusMessage, bool)>,
+    tx_proposer: Sender<Certificate>,
+    rx_request_header_sync: Receiver<Digest>,
+    tx_info: Sender<ConsensusMessage>,
+    leader_elector: LeaderElector,
+    timeout_delay: u64,
+    use_optimistic_tips: bool,
+    use_parallel_proposals: bool,
+    k: u64,
+    use_fast_path: bool,
+    fast_path_timeout: u64,
+    use_ride_share: bool,
+    car_timeout: u64,
+) {
+    let parameters = Parameters::default();
+    let node_index = committee.id_map[&name];
+    let (tx_worker_async, mut rx_worker_async) = channel(16);
+    let (tx_metrics, rx_metrics) = channel(16);
+    let (tx_params, mut rx_params) = channel(16);
+    tokio::spawn(async move { while rx_worker_async.recv().await.is_some() {} });
+    tokio::spawn(async move { while rx_params.recv().await.is_some() {} });
+    Core::spawn(
+        name,
+        committee,
+        store,
+        format!(".db-test-{}", node_index),
+        synchronizer,
+        signature_service,
+        consensus_round,
+        gc_depth,
+        rx_primaries,
+        rx_header_waiter,
+        rx_header_waiter_instances,
+        rx_proposer,
+        tx_committer,
+        tx_proposer,
+        rx_request_header_sync,
+        tx_info,
+        leader_elector,
+        timeout_delay,
+        use_optimistic_tips,
+        use_parallel_proposals,
+        k,
+        use_fast_path,
+        fast_path_timeout,
+        use_ride_share,
+        car_timeout,
+        parameters.cut_condition_type,
+        parameters.simulate_asynchrony,
+        parameters.asynchrony_type,
+        parameters.asynchrony_start,
+        parameters.asynchrony_duration,
+        parameters.affected_nodes,
+        parameters.asynchrony_node_ids_per_window,
+        parameters.egress_penalty,
+        parameters.egress_penalty_per_node,
+        parameters.use_exponential_timeouts,
+        tx_worker_async,
+        VecDeque::new(),
+        parameters.epoch_slots,
+        parameters.window_size,
+        rx_metrics,
+        tx_metrics,
+        tx_params,
+        parameters.header_size,
+        parameters.max_header_delay,
+        parameters.batch_size,
+        parameters.max_batch_delay,
+        parameters.applied_begin,
+        parameters.aggregation_strategy,
+        parameters.data_pollution_node_ids,
+        parameters.data_pollution_prob,
+        parameters.data_pollution_strategy,
+    );
+}
+
 #[tokio::test]
 #[serial]
 async fn process_header() {
@@ -59,6 +150,7 @@ async fn process_header() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -67,7 +159,7 @@ async fn process_header() {
     let timeout_delay = 1000;
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee,
         store.clone(),
@@ -149,6 +241,7 @@ async fn process_header_missing_parent() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -157,7 +250,7 @@ async fn process_header_missing_parent() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee,
         store.clone(),
@@ -190,6 +283,7 @@ async fn process_header_missing_parent() {
         author: header_one.author,
         height: header_one.height + 1,
         payload: header_one.payload,
+        batch_metadata: header_one.batch_metadata,
         parent_cert: cert_one,
         id: header_one.id,
         signature: header_one.signature,
@@ -239,6 +333,7 @@ async fn process_header_invalid_height() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee().clone());
@@ -247,7 +342,7 @@ async fn process_header_invalid_height() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee(),
         store.clone(),
@@ -323,6 +418,7 @@ async fn process_header_missing_payload() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee().clone());
@@ -331,7 +427,7 @@ async fn process_header_missing_payload() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee(),
         store.clone(),
@@ -405,6 +501,7 @@ async fn process_votes() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -413,7 +510,7 @@ async fn process_votes() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -509,6 +606,7 @@ async fn process_certificates() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee().clone());
@@ -517,7 +615,7 @@ async fn process_certificates() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee(),
         store.clone(),
@@ -620,6 +718,7 @@ async fn process_prepare() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -628,7 +727,7 @@ async fn process_prepare() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -760,6 +859,7 @@ async fn generate_confirm() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -768,7 +868,7 @@ async fn generate_confirm() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -914,6 +1014,7 @@ async fn generate_commit() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -922,7 +1023,7 @@ async fn generate_commit() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -1065,7 +1166,7 @@ async fn generate_commit() {
                     tx_headers.send(commit_header).await.unwrap();
 
                     //println!("awaiting committer");
-                    let receive_commit_message = rx_committer.recv().await.unwrap();
+                    let (receive_commit_message, _fast_commit) = rx_committer.recv().await.unwrap();
                     match receive_commit_message {
                         ConsensusMessage::Commit {
                             slot: slot2,
@@ -1132,6 +1233,7 @@ async fn generate_pipelined_prepare() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -1140,7 +1242,7 @@ async fn generate_pipelined_prepare() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -1310,6 +1412,7 @@ async fn local_timeout_view() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -1318,7 +1421,7 @@ async fn local_timeout_view() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -1397,6 +1500,7 @@ async fn sync_missing_proposals() {
         store.clone(),
         /* tx_header_waiter */ tx_sync_headers,
         /* tx_certificate_waiter */ tx_sync_certificates,
+        false, // use_fast_sync
     );
 
     let leader_elector = LeaderElector::new(committee.clone());
@@ -1405,7 +1509,7 @@ async fn sync_missing_proposals() {
     let parameters = Parameters::default();
 
     // Spawn the core.
-    Core::spawn(
+    spawn_test_core(
         name,
         committee.clone(),
         store.clone(),
@@ -1447,6 +1551,8 @@ async fn sync_missing_proposals() {
         rx_sync_headers,
         tx_headers_loopback,
         tx_header_waiter_instances,
+        parameters.use_fast_sync,
+        parameters.use_optimistic_tips,
     );
 
     // Send headers to the core, so they won't request sync

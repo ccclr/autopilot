@@ -24,6 +24,11 @@ pub fn keys() -> Vec<(PublicKey, SecretKey)> {
 // Fixture
 pub fn committee() -> Committee {
     Committee {
+        id_map: keys()
+            .into_iter()
+            .enumerate()
+            .map(|(i, (key, _))| (key, i as u64))
+            .collect(),
         authorities: keys()
             .iter()
             .enumerate()
