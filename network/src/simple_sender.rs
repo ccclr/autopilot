@@ -10,6 +10,7 @@ use rand::SeedableRng as _;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -42,24 +43,33 @@ impl SimpleSender {
 
     /// Helper function to spawn a new connection.
     fn spawn_connection(address: SocketAddr) -> Sender<Bytes> {
-        let (tx, rx) = channel(1_000);
+        let (tx, rx) = channel(100_000);
         Connection::spawn(address, rx);
         tx
     }
 
     /// Try (best-effort) to send a message to a specific address.
     /// This is useful to answer sync requests.
+    ///
+    /// Never waits for a full connection queue: under backpressure the message
+    /// is dropped so producers (BatchMaker, PrimaryConnector) cannot stall.
     pub async fn send(&mut self, address: SocketAddr, data: Bytes) {
-        // Try to re-use an existing connection if possible.
         if let Some(tx) = self.connections.get(&address) {
-            if tx.send(data.clone()).await.is_ok() {
-                return;
+            match tx.try_send(data.clone()) {
+                Ok(()) => return,
+                Err(TrySendError::Full(_)) => {
+                    warn!(
+                        "Dropping outbound message to {} (connection queue full)",
+                        address
+                    );
+                    return;
+                }
+                Err(TrySendError::Closed(_)) => {}
             }
         }
 
-        // Otherwise make a new connection.
         let tx = Self::spawn_connection(address);
-        if tx.send(data).await.is_ok() {
+        if tx.try_send(data).is_ok() {
             self.connections.insert(address, tx);
         }
     }

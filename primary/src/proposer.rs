@@ -14,6 +14,13 @@ use tokio::time::{sleep, Duration, Instant};
 #[path = "tests/proposer_tests.rs"]
 pub mod proposer_tests;
 
+/// Soft cap on batches per car. `header_size` is only the early-propose
+/// threshold; taking the whole backlog (hundreds of digests) makes a header
+/// that cannot be certified, but capping at `header_size` itself starves
+/// throughput. Healthy cars carry a handful of batches; 16 is above that
+/// and still far below the 200+ cars that froze a lane.
+const MAX_DIGESTS_PER_HEADER: usize = 16;
+
 /// The proposer creates new headers and send them to the core for broadcasting and further processing.
 pub struct Proposer {
     /// The public key of this primary.
@@ -102,39 +109,19 @@ impl Proposer {
         });
     }
 
+    /// Take the queued digests, but never more than `MAX_DIGESTS_PER_HEADER`.
+    fn take_digests_for_header(&mut self) -> Vec<(Digest, WorkerId, config::BatchMetadata)> {
+        let take_n = self.digests.len().min(MAX_DIGESTS_PER_HEADER);
+        let drained: Vec<_> = self.digests.drain(..take_n).collect();
+        let taken_size: usize = drained.iter().map(|(digest, _, _)| digest.size()).sum();
+        self.payload_size = self.payload_size.saturating_sub(taken_size);
+        drained
+    }
+
     async fn make_header(&mut self) {
-        // Make a new header.
         debug!("digests size before is {:?}", self.digests.len());
-        /*let mut header: Header;
-        if self.digests.len() > 0 {
-            let drained: Vec<_> = self.digests.drain(..1).collect();
-            let payload: BTreeMap<Digest, WorkerId> = drained.iter().map(|(d, w, _)| (*d, *w)).collect();
-            let batch_metadata: BTreeMap<Digest, config::BatchMetadata> = drained.into_iter().map(|(d, _, m)| (d, m)).collect();
-            header = Header::new(
-                self.name,
-                self.height,
-                payload,
-                batch_metadata,
-                self.last_parent.clone().unwrap(),
-                &mut self.signature_service,
-                self.consensus_instances.clone(),
-                self.num_active_instances,
-            ).await;
-        } else {
-            header = Header::new(
-                self.name,
-                self.height,
-                BTreeMap::new(),
-                BTreeMap::new(),
-                self.last_parent.clone().unwrap(),
-                &mut self.signature_service,
-                self.consensus_instances.clone(),
-                self.num_active_instances,
-            ).await;
 
-        }*/
-
-        let drained: Vec<_> = self.digests.drain(..).collect();
+        let drained = self.take_digests_for_header();
         let payload: BTreeMap<Digest, WorkerId> =
             drained.iter().map(|(d, w, _)| (d.clone(), *w)).collect();
         let batch_metadata: BTreeMap<Digest, config::BatchMetadata> =
@@ -198,6 +185,11 @@ impl Proposer {
         let mut current_time = Instant::now();
 
         loop {
+            while let Ok((digest, worker_id, metadata)) = self.rx_workers.try_recv() {
+                self.payload_size += digest.size();
+                self.digests.push((digest, worker_id, metadata));
+            }
+
             // Check if we can propose a new header. We propose a new header when one of the following
             // conditions is met:
             // 1. We have a quorum of certificates from the previous round and enough batches' digests;
@@ -224,9 +216,8 @@ impl Proposer {
                 debug!("is special is {:?}", self.is_special);
                 current_time = Instant::now();
 
-                // Make a new header.
+                // Make a new header. Leftover digests keep their payload_size.
                 self.make_header().await;
-                self.payload_size = 0;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);

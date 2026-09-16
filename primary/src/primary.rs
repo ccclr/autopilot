@@ -48,7 +48,7 @@ use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 /// The default channel capacity for each channel of the primary.
-pub const CHANNEL_CAPACITY: usize = 1_000;
+pub const CHANNEL_CAPACITY: usize = 100_000;
 
 /// The round number.
 pub type Height = u64;
@@ -455,16 +455,24 @@ impl MessageHandler for WorkerReceiverHandler {
     ) -> Result<(), Box<dyn Error>> {
         // Deserialize and parse the message.
         match bincode::deserialize(&serialized).map_err(DagError::SerializationError)? {
-            WorkerPrimaryMessage::OurBatch(digest, worker_id, metadata) => self
-                .tx_our_digests //sender channel to Proposer
-                .send((digest, worker_id, metadata))
-                .await
-                .expect("Failed to send workers' digests"),
-            WorkerPrimaryMessage::OthersBatch(digest, worker_id, metadata) => self
-                .tx_others_digests //sender channel to PayloadReceiver
-                .send((digest, worker_id, metadata))
-                .await
-                .expect("Failed to send workers' digests"),
+            WorkerPrimaryMessage::OurBatch(digest, worker_id, metadata) => {
+                if self
+                    .tx_our_digests
+                    .try_send((digest, worker_id, metadata))
+                    .is_err()
+                {
+                    warn!("WorkerReceiverHandler: proposer digest channel full, dropping OurBatch");
+                }
+            }
+            WorkerPrimaryMessage::OthersBatch(digest, worker_id, metadata) => {
+                if self
+                    .tx_others_digests
+                    .try_send((digest, worker_id, metadata))
+                    .is_err()
+                {
+                    warn!("WorkerReceiverHandler: payload channel full, dropping OthersBatch");
+                }
+            }
         }
         Ok(())
     }

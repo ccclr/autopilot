@@ -5,7 +5,7 @@ use config::{BatchMetadata, WorkerId};
 use crypto::{Digest, PublicKey};
 use ed25519_dalek::Digest as _;
 use ed25519_dalek::Sha512;
-use log::debug;
+use log::{debug, warn};
 use primary::WorkerPrimaryMessage;
 use std::convert::TryInto;
 use store::Store;
@@ -93,16 +93,19 @@ impl Processor {
                 store.write(digest.to_vec(), batch).await;
 
                 // Deliver the batch's digest and metadata.
+                let digest_for_log = digest.clone();
                 let message = match own_digest {
                     true => WorkerPrimaryMessage::OurBatch(digest, id, batch_metadata),
                     false => WorkerPrimaryMessage::OthersBatch(digest, id, batch_metadata),
                 };
                 let message = bincode::serialize(&message)
                     .expect("Failed to serialize our own worker-primary message");
-                tx_digest
-                    .send(message)
-                    .await
-                    .expect("Failed to send digest");
+                if tx_digest.try_send(message).is_err() {
+                    warn!(
+                        "Processor: digest channel full, dropping batch {:?}",
+                        digest_for_log
+                    );
+                }
             }
         });
     }
