@@ -354,7 +354,9 @@ class CMABExportIsolationTests(unittest.TestCase):
                 )
 
             with mock.patch.object(Path, "exists", signal_exists):
-                trainer.run(num_iterations=2, checkpoint_freq=10)
+                with mock.patch.object(trainer, "_save_latest_checkpoint") as save_latest:
+                    trainer.run(num_iterations=2, checkpoint_freq=10)
+                self.assertEqual(save_latest.call_count, 0)
 
             self.assertEqual(policy.updated, [ARMS[0], ARMS[0]])
             self.assertEqual(len(writer.transitions), 1)

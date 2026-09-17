@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import socket
+import tempfile
 import time
 import hashlib
 from collections import deque
@@ -35,6 +36,7 @@ class CMABTrainer:
         warmup_iterations: int = 5,
         checkpoint_prefix: str = "cmab_checkpoint",
         transition_writer: Optional[AsyncTransitionDatasetWriter] = None,
+        latest_checkpoint_path: Optional[str] = None,
     ):
         self.metrics_dir = Path(metrics_dir)
         self.parameters_file = Path(parameters_file)
@@ -55,6 +57,9 @@ class CMABTrainer:
         self.warmup_iterations = max(0, warmup_iterations)
         self.checkpoint_prefix = checkpoint_prefix or "cmab_checkpoint"
         self.transition_writer = transition_writer
+        self.latest_checkpoint_path = (
+            Path(latest_checkpoint_path) if latest_checkpoint_path else None
+        )
 
     def run(self, num_iterations: Optional[int], checkpoint_freq: int):
         logger.info("Initializing CMAB training loop...")
@@ -178,6 +183,8 @@ class CMABTrainer:
                     update_contexts,
                     shared_seed_hex=shared_seed_hex,
                 )
+                if reward_epoch is not None and reward_epoch % 10 == 0:
+                    self._save_latest_checkpoint()
             else:
                 logger.info(
                     "Warmup iteration %s/%s: skip policy update (reward=%.6f, arm=%s)",
@@ -244,6 +251,27 @@ class CMABTrainer:
 
         if self.transition_writer is not None:
             self._close_transition_writer()
+
+    def _save_latest_checkpoint(self) -> None:
+        """Publish a complete per-run snapshot without damaging the last good one."""
+        path = self.latest_checkpoint_path
+        if path is None:
+            return
+        temporary_path = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+            self.policy.save(str(temporary_path))
+            os.replace(temporary_path, path)
+            logger.info("Saved latest run checkpoint: %s", path)
+        except Exception:
+            logger.exception("Failed to save latest run checkpoint: %s", path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def stop(self):
         self.training_active = False

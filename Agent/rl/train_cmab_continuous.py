@@ -137,6 +137,10 @@ def main():
         node_index=args.node_index,
         warmup_iterations=warmup_iterations,
         transition_writer=transition_writer,
+        latest_checkpoint_path=(
+            str(transition_writer.run_dir / "cmab_checkpoint_latest.pkl")
+            if transition_writer is not None else None
+        ),
     )
 
     trainer.run(num_iterations=args.num_iterations, checkpoint_freq=args.checkpoint_freq)
