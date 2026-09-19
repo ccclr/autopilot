@@ -235,12 +235,12 @@ def remote(ctx, debug=False):
         'nodes': [4],
         'workers': 1,
         'collocate': True,
-        'rate': [32_000],
+        'rate': [40_000],
         'tx_size': 512,
         # Configure exactly one stop condition. With epochs=100, epoch 0 is
         # bootstrap and the run stops after measured epochs 1..100 complete.
-        'duration': 600,
-        'epochs': None,
+        'duration': None,
+        'epochs': 120,
         'runs': 1,
         # True: create a timestamped txt file for every run instead of
         # appending to an existing result file.
@@ -395,9 +395,9 @@ def remote(ctx, debug=False):
     }
 
     measurement_config = {
-        'epoch_slots': 48,
+        'epoch_slots': 32,
         'window_size': 16,
-        'applied_begin': 44,
+        'applied_begin': 30,
     }
 
     aggregation_config = {
