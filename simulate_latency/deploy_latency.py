@@ -1,5 +1,6 @@
 from fabric import Connection
 from pathlib import Path
+from shlex import quote
 
 try:
     # Package execution: python -m autopilot.simulate_latency.deploy_latency
@@ -28,20 +29,22 @@ def deploy(node):
     script = SCRIPT_DIR / f"{node}_tc.sh"
 
 
-    conn.put(
-        str(script),
-        "/tmp/tc_latency.sh"
-    )
-
-
-    conn.run(
-        "chmod +x /tmp/tc_latency.sh"
-    )
-
-
-    conn.run(
-        "sudo /tmp/tc_latency.sh"
-    )
+    try:
+        # A shared fixed filename may belong to another user from an earlier run.
+        remote_script = conn.run(
+            "mktemp /tmp/autopilot-tc-XXXXXXXX.sh", hide=True
+        ).stdout.strip()
+        if not remote_script:
+            raise RuntimeError("Remote mktemp returned an empty path")
+        remote_path = quote(remote_script)
+        try:
+            conn.put(str(script), remote_script)
+            conn.run(f"chmod 700 {remote_path}")
+            conn.run(f"sudo bash {remote_path}")
+        finally:
+            conn.run(f"rm -f -- {remote_path}", warn=True)
+    finally:
+        conn.close()
 
 
     print(

@@ -15,7 +15,7 @@ LATENCY = {
     },
 
     "node1": {
-        "node0": 39,
+        "node0": 30,
         "node2": 50,
         "node3": 50,
     },

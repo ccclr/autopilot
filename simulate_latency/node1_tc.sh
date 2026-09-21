@@ -16,7 +16,7 @@ sudo tc qdisc add dev $IFACE root handle 1: prio
 sudo tc qdisc add dev $IFACE \
     parent 1:1 \
     handle 10: \
-    netem delay 39ms
+    netem delay 30ms
 
 
 sudo tc filter add dev $IFACE \

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Sweep fast_path_timeout (20..200 step 20), 2 independent full Bench.run calls per point.
+"""Sweep fast_path_timeout (0..200 step 20), 3 independent runs per point.
 
 Each trial keeps runs=1 (equivalent to re-invoking `fab remote`), archives the SUMMARY
-block to results/fpt_sweep/, then moves to the next trial/timeout.
+block to a baseline-specific results directory, then moves to the next trial/timeout.
 
 Usage (from benchmark/):
   python3 sweep_fast_path_timeout.py
@@ -33,7 +33,7 @@ from benchmark.cloudlab_remote import CloudLabBench as Bench
 from benchmark.utils import BenchError, PathMaker, Print
 
 
-# Frozen copy of fabfile.remote() params (do not set runs>1).
+# Fixed workload; independent of fabfile.remote(). Do not set runs>1.
 BENCH_PARAMS = {
     "faults": 0,
     "nodes": [4],
@@ -42,7 +42,12 @@ BENCH_PARAMS = {
     "rate": [40_000],
     "tx_size": 512,
     "duration": 120,
+    "epochs": None,
     "runs": 1,
+    "enable_rl": False,
+    "enable_checkpoint": False,
+    "enable_cmab_transition_export": False,
+    "new_result_file_per_run": False,  # Archive reader expects the append-only file.
     "cmab_resume_from": None,
     "rl_algo": "gp_bo",
     "rl_warmup_iterations": 5,
@@ -57,6 +62,9 @@ BENCH_PARAMS = {
     "hotspot_region_rates": [[]],
 }
 
+# Offline environment A: 137 transitions across 3 runs, mean reward 2.099
+# for batch=100000/header=32/cut=2/k=1 (pooling recorded timeout values).
+# CMAB samples are not randomized trials; validate this candidate with the sweep.
 NODE_PARAMS = {
     "timeout_delay": 5_000,
     "header_size": 32,
@@ -68,7 +76,7 @@ NODE_PARAMS = {
     "max_batch_delay": 5000,
     "use_optimistic_tips": True,
     "use_parallel_proposals": True,
-    "k": 4,
+    "k": 1,
     "epoch_slots": 32,
     "window_size": 16,
     "applied_begin": 30,
@@ -76,7 +84,7 @@ NODE_PARAMS = {
     "fast_path_timeout": 100,
     "use_ride_share": False,
     "car_timeout": 2000,
-    "cut_condition_type": 3,
+    "cut_condition_type": 2,
     "simulate_asynchrony": False,
     "asynchrony_type": [6],
     "asynchrony_start": [0],
@@ -368,12 +376,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sweep fast_path_timeout with independent fab-remote-equivalent runs")
     parser.add_argument(
         "--timeouts",
-        default="20,40,60,80,100,120,140,160,180,200",
+        default=",".join(str(t) for t in range(0, 201, 20)),
         help="Comma-separated timeout list in ms",
     )
-    parser.add_argument("--trials", type=int, default=4, help="Independent full runs per timeout (default 4)")
+    parser.add_argument("--trials", type=int, default=3, help="Independent full runs per timeout (default 3)")
     parser.add_argument("--retries", type=int, default=1, help="Extra retries per trial on failure (default 1)")
-    parser.add_argument("--debug", action="store_true", default=True)
+    parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--no-debug", action="store_true", help="Disable debug logging for node binaries")
     parser.add_argument(
         "--duration",
@@ -385,7 +393,7 @@ def main() -> int:
         "--archive-dir",
         default=None,
         help="Directory for per-trial SUMMARY archives "
-             "(default: results/fpt_sweep_<duration>s)",
+             "(default: results/fpt_sweep_offline_A_b100000_h32_cut2_k1_<duration>s)",
     )
     parser.add_argument(
         "--skip-existing",
@@ -415,7 +423,7 @@ def main() -> int:
     archive_dir = Path(
         args.archive_dir
         if args.archive_dir
-        else (_script_dir() / "results" / f"fpt_sweep_{duration}s")
+        else (_script_dir() / "results" / f"fpt_sweep_offline_A_b100000_h32_cut2_k1_{duration}s")
     )
     archive_dir.mkdir(parents=True, exist_ok=True)
 
