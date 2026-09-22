@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Sweep fast_path_timeout (20..200 step 20), 2 independent full Bench.run calls per point.
+"""Sweep fast_path_timeout on a frozen network setting.
 
-Each trial keeps runs=1 (equivalent to re-invoking `fab remote`), archives the SUMMARY
-block to results/fpt_sweep/, then moves to the next trial/timeout.
+Network: restored from results/fpt_sweep_90s/predicted_plateaus.json.
+egress_penalty[0][0] = [0, 0, 0, 80] -> Δ = 10 / 50 / 50 / 90.
+node3/0/1 beat slow0 (save 50/40/40); node2 prefers slow0 by 30 ms.
+
+Timeout grid is confined to [0, 200] ms: interior points of predicted
+path-decision plateaus ([0,10) [10,50) [50,90) [90,∞)) plus an all-fast
+tail (150, 200). k=1 as in that sweep.
 
 Usage (from benchmark/):
   python3 sweep_fast_path_timeout.py
-  python3 sweep_fast_path_timeout.py --timeouts 20,40,100 --trials 2
+  python3 sweep_fast_path_timeout.py --timeouts 0,5,30,70,150,200 --trials 3
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ import traceback
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 
 from fabric import Config
 from invoke import Context
@@ -34,6 +39,8 @@ from benchmark.utils import BenchError, PathMaker, Print
 
 
 # Frozen copy of fabfile.remote() params (do not set runs>1).
+# Plateau verification: freeze everything except fast_path_timeout.
+# RL controller is commented out in cloudlab_remote.py; keep rl_algo unused.
 BENCH_PARAMS = {
     "faults": 0,
     "nodes": [4],
@@ -41,7 +48,7 @@ BENCH_PARAMS = {
     "collocate": True,
     "rate": [40_000],
     "tx_size": 512,
-    "duration": 120,
+    "duration": 90,
     "runs": 1,
     "cmab_resume_from": None,
     "rl_algo": "gp_bo",
@@ -64,11 +71,11 @@ NODE_PARAMS = {
     "gc_depth": 50,
     "sync_retry_delay": 5000,
     "sync_retry_nodes": 3,
-    "batch_size": 500_000,
+    "batch_size": 100_000,
     "max_batch_delay": 5000,
     "use_optimistic_tips": True,
     "use_parallel_proposals": True,
-    "k": 4,
+    "k": 1,
     "epoch_slots": 32,
     "window_size": 16,
     "applied_begin": 30,
@@ -77,14 +84,17 @@ NODE_PARAMS = {
     "use_ride_share": False,
     "car_timeout": 2000,
     "cut_condition_type": 3,
-    "simulate_asynchrony": False,
+    # VoteDelay: each node delays its own ConsensusVote by the per-node
+    # penalty below (index == node index). Window covers the whole run.
+    # Format is window -> region -> per-node (see cloudlab_remote.run).
+    "simulate_asynchrony": True,
     "asynchrony_type": [6],
     "asynchrony_start": [0],
     "asynchrony_duration": [3000],
-    "affected_nodes": [],
-    "asynchrony_nodes": [],
-    "asynchrony_regions": [[]],
-    "egress_penalty": [[]],
+    "affected_nodes": [4],
+    "asynchrony_nodes": [4],
+    "asynchrony_regions": [["Clem"]],
+    "egress_penalty": [[[0, 20, 120, 160]]],
     "use_fast_sync": True,
     "use_exponential_timeouts": True,
     "aggregation_strategy": "normal",
@@ -265,6 +275,96 @@ def _avg_fast_path_ratio_local() -> dict:
     }
 
 
+def _parse_metrics_ts(ts: str) -> datetime:
+    """Parse RFC3339 with nanoseconds (Python only accepts <=6 fraction digits)."""
+    head, _, tz = ts.partition("+")
+    if "." in head:
+        base, frac = head.split(".", 1)
+        head = f"{base}.{frac[:6]}"
+    return datetime.fromisoformat(f"{head}+{tz}" if tz else head)
+
+
+def _leader_path_stats_local(n_nodes: int = 4, skip_slots: int = 4) -> dict:
+    """Per-leader (slot % n) fast/slow counts and Prepare->commit medians.
+
+    Read from the local node's <home>/logs/metrics-*.log. Leader election
+    (SemiParallelRRLeaderElector) is sorted_pks[(slot + view) % n]; keys are
+    regenerated per run, so the 'committee' events (pk + consensus_addr) are
+    used to map the leader back to a stable node label (10.10.1.X -> nodeX-1).
+    Prepare time = first 'prepare' event for the slot; commit time =
+    'fast_path'/'slow_path' event (carries the committing view).
+    """
+    home = _local_metrics_home()
+    logs = sorted((home / "logs").glob("metrics-*.log"))
+    if not logs:
+        return {"error": f"no metrics-*.log under {home / 'logs'}"}
+    prep: dict[int, datetime] = {}
+    commit: dict[int, tuple[datetime, str, int]] = {}
+    committee: dict[str, str] = {}  # pk hex -> consensus ip
+    with logs[0].open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            d = ev.get("details", {})
+            et = ev.get("event_type")
+            if et == "prepare" and "slot" in d:
+                t = _parse_metrics_ts(ev["timestamp"])
+                s = int(d["slot"])
+                prep[s] = min(prep.get(s, t), t)
+            elif et in ("fast_path", "slow_path") and "slot" in d:
+                commit[int(d["slot"])] = (
+                    _parse_metrics_ts(ev["timestamp"]), et, int(d.get("view", 1))
+                )
+            elif et == "committee" and "pk" in d:
+                committee[d["pk"]] = str(d.get("consensus_addr", "")).split(":")[0]
+
+    sorted_pks = sorted(committee)  # hex sort == byte sort of PublicKey
+
+    def leader_label(slot: int, view: int) -> str:
+        if len(sorted_pks) != n_nodes:
+            return f"slot_mod_{slot % n_nodes}"
+        ip = committee[sorted_pks[(slot + view) % n_nodes]]
+        try:
+            return f"node{int(ip.rsplit('.', 1)[1]) - 1}"
+        except (IndexError, ValueError):
+            return ip or f"slot_mod_{slot % n_nodes}"
+
+    per_leader: dict[str, dict] = {}
+    for s, (t, et, view) in commit.items():
+        if s <= skip_slots or s not in prep:
+            continue
+        key = leader_label(s, view)
+        entry = per_leader.setdefault(
+            key, {"fast": 0, "slow": 0, "fast_ms": [], "slow_ms": []}
+        )
+        ms = (t - prep[s]).total_seconds() * 1000.0
+        if et == "fast_path":
+            entry["fast"] += 1
+            entry["fast_ms"].append(ms)
+        else:
+            entry["slow"] += 1
+            entry["slow_ms"].append(ms)
+
+    out = {
+        "source": str(logs[0]),
+        "leader_rule": "sorted_pks[(slot+view) % n]",
+        "sorted_pk_ips": [committee[pk] for pk in sorted_pks],
+        "leaders": {},
+    }
+    for key in sorted(per_leader):
+        e = per_leader[key]
+        total = e["fast"] + e["slow"]
+        out["leaders"][key] = {
+            "n": total,
+            "fast_ratio": (e["fast"] / total) if total else None,
+            "fast_median_ms": median(e["fast_ms"]) if e["fast_ms"] else None,
+            "slow_median_ms": median(e["slow_ms"]) if e["slow_ms"] else None,
+        }
+    return out
+
+
 def _archive_summary(
     result_path: Path,
     archive_dir: Path,
@@ -295,6 +395,12 @@ def _archive_summary(
 
     ratio_info = _avg_fast_path_ratio_local()
     avg_ratio = ratio_info["avg_fast_path_ratio"]
+    try:
+        ratio_info["leader_path_stats"] = _leader_path_stats_local(
+            n_nodes=BENCH_PARAMS["nodes"][0]
+        )
+    except Exception as e:  # best-effort diagnostic only
+        ratio_info["leader_path_stats"] = {"error": str(e)}
 
     out = archive_dir / f"fpt-{timeout}ms-trial{trial}.txt"
     metrics_out = archive_dir / f"fpt-{timeout}ms-trial{trial}.metrics.json"
@@ -316,6 +422,11 @@ def _archive_summary(
         f"{ratio_info['n_files_used']} JSON files in "
         f"{[Path(p).name for p in ratio_info['metrics_dirs']]} = {avg_ratio:.4f}"
     )
+    for key, st in ratio_info["leader_path_stats"].get("leaders", {}).items():
+        Print.info(
+            f"  {key}: n={st['n']} fast_ratio={st['fast_ratio']:.2f} "
+            f"fast_med={st['fast_median_ms']} slow_med={st['slow_median_ms']}"
+        )
     return out
 
 
@@ -368,7 +479,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sweep fast_path_timeout with independent fab-remote-equivalent runs")
     parser.add_argument(
         "--timeouts",
-        default="40, 50, 60, 70, 80, 90, 100, 110, 120",
+        default="0,10,30,50,70,90,110,130,150,170,180,190,200",
         help="Comma-separated timeout list in ms",
     )
     parser.add_argument("--trials", type=int, default=3, help="Independent full runs per timeout")
@@ -418,6 +529,48 @@ def main() -> int:
         else (_script_dir() / "results" / f"fpt_sweep_{duration}s")
     )
     archive_dir.mkdir(parents=True, exist_ok=True)
+
+    # Record predicted Δ plateaus from the deployed latency_config.
+    try:
+        sim_dir = str((_script_dir().parent / "simulate_latency").resolve())
+        if sim_dir not in sys.path:
+            sys.path.insert(0, sim_dir)
+        from latency_config import (
+            VOTE_DELAY_MS,
+            leader_fast_path_stats,
+            predicted_plateaus,
+        )
+
+        # Guard: the Δ prediction assumes the deployed VoteDelay penalties.
+        penalties = list(NODE_PARAMS["egress_penalty"][0][0])
+        expected = [VOTE_DELAY_MS[f"node{i}"] for i in range(len(penalties))]
+        if penalties != expected:
+            Print.error(
+                f"egress_penalty {penalties} != latency_config.VOTE_DELAY_MS {expected}"
+            )
+            return 1
+
+        pred = {
+            "leaders": leader_fast_path_stats(),
+            "plateaus": predicted_plateaus(),
+            "vote_delay_ms": penalties,
+            "timeouts_ms": timeouts,
+            "k": NODE_PARAMS["k"],
+            "cut_condition_type": NODE_PARAMS["cut_condition_type"],
+            "rate": BENCH_PARAMS["rate"],
+            "duration": duration,
+        }
+        pred_path = archive_dir / "predicted_plateaus.json"
+        pred_path.write_text(json.dumps(pred, indent=2) + "\n", encoding="utf-8")
+        Print.info(f"Wrote predicted Δ plateaus -> {pred_path}")
+        for p in pred["plateaus"]:
+            hi = "inf" if p["timeout_hi_ms"] is None else p["timeout_hi_ms"]
+            Print.info(
+                f"  [{p['timeout_lo_ms']}, {hi}): fast={p['fast_leaders']} "
+                f"ratio={p['fast_ratio']:.2f}"
+            )
+    except Exception as e:
+        Print.warn(f"Could not record predicted plateaus: {e}")
 
     # Run from benchmark/ so relative logs/results paths match fab remote.
     os.chdir(_script_dir())

@@ -178,7 +178,7 @@ def plot_curve(summary: list[dict], out_path: Path) -> None:
     ax.set_title("Fast path timeout vs latency")
     ax.set_xticks(xs)
     ax.grid(True, alpha=0.5)
-    ax.set_ylim(0, 1000)
+    ax.set_ylim(0, 800)
 
     if has_ratio:
         ax2 = ax.twinx()
@@ -210,7 +210,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Plot FPT sweep latency curve")
     parser.add_argument(
         "--archive-dir",
-        default=str(_script_dir() / "results" / "fpt_sweep_120s"),
+        default=str(_script_dir() / "results" / "fpt_sweep_90s"),
         help="Directory with fpt-*ms-trial*.txt archives",
     )
     parser.add_argument(
@@ -220,8 +220,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--csv",
-        default=str(_script_dir() / "results" / "fpt_sweep_120s" / "summary.csv"),
-        help="Output summary CSV path",
+        default=None,
+        help="Output summary CSV path (default: <archive-dir>/summary.csv)",
     )
     parser.add_argument(
         "--keep-trials",
@@ -253,7 +253,7 @@ def main() -> int:
         return 1
 
     summary = aggregate(rows, keep_trials=args.keep_trials)
-    csv_path = Path(args.csv)
+    csv_path = Path(args.csv) if args.csv else (archive_dir / "summary.csv")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_csv(summary, csv_path)
 

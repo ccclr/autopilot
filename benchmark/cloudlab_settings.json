@@ -10,7 +10,7 @@
         "branch": "cloudlab"
     },
     "username": "clr0302",
-    "home": "/users/clr0302/",
+    "home": "/local",
     "hosts": [
         {
             "hostname": "10.10.1.1",

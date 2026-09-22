@@ -179,7 +179,7 @@ def remote(
     debug=False,
     cmab_seed=0,
     cmab_action_encoding='numeric',
-    duration=3600,
+    duration=120,
     cmab_policy='combined',
     cmab_start_pos=0,
 ):
@@ -221,10 +221,10 @@ def remote(
         'rl_algo': 'cmab',
         # CMAB-RF action representation. Use "numeric" for the existing
         # baseline and "one_hot" for the encoding comparison experiment.
-        'cmab_action_encoding': encoding,
+        'cmab_action_encoding': "numeric",
         # Pair numeric/one_hot with the same seed; change only between reps.
-        'cmab_seed': int(cmab_seed),
-        'rl_warmup_iterations': 5,
+        'cmab_seed': 0,
+        'rl_warmup_iterations': 3,
         # rf_ts: global RF. factorized / combined: dedicated reward models.
         # random / default / round_robin: selection-only.
         'cmab_policy': policy,
@@ -256,26 +256,26 @@ def remote(
         'use_optimistic_tips': True,
         'use_parallel_proposals': True,
         'k': 4,
-        'epoch_slots': 60,
+        'epoch_slots': 30,
         'window_size': 12,
         # Apply on first commit at/after this position (Rust uses >=).
         # Keep well below epoch_slots so k-parallel slot skips still land.
-        'applied_begin': 56,
+        'applied_begin': 28,
         'use_fast_path': True,
         'fast_path_timeout': 100,
         'use_ride_share': False,
         'car_timeout': 2000,
         'cut_condition_type': 3,
 
-        'simulate_asynchrony': False,
+        'simulate_asynchrony': True,
         'asynchrony_type': [6],
 
         'asynchrony_start': [0],  # s
-        'asynchrony_duration': [3000],  # s
-        'affected_nodes': [ ],
-        'asynchrony_nodes': [ ],
-        'asynchrony_regions': [[ ]],
-        'egress_penalty': [[ ]],
+        'asynchrony_duration': [120],  # s
+        'affected_nodes': [4],
+        'asynchrony_nodes': [4],
+        'asynchrony_regions': [['Clem']],
+        'egress_penalty': [[0, 10, 30, 70]],
 
         'use_fast_sync': True,
         'use_exponential_timeouts': False,

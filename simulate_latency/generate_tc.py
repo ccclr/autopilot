@@ -78,6 +78,23 @@ sudo tc filter add dev {iface} \\
     return "".join(lines)
 
 
+def print_fast_path_prediction():
+    print("\nPredicted per-leader Δ (timeout thresholds):")
+    for s in leader_fast_path_stats():
+        print(
+            f"  {s['leader']}: remotes={s['remote_rtts_ms']} "
+            f"T_2f1={s['t_2f1_ms']} T_n={s['t_n_ms']} Δ={s['delta_ms']} "
+            f"confirm≈{s['t_confirm_ms']} fast_better={s['fast_better_than_slow0']}"
+        )
+    print("\nPredicted path-decision plateaus:")
+    for p in predicted_plateaus():
+        hi = "∞" if p["timeout_hi_ms"] is None else str(p["timeout_hi_ms"])
+        print(
+            f"  timeout ∈ [{p['timeout_lo_ms']}, {hi}): "
+            f"fast={p['fast_leaders'] or 'none'} ratio={p['fast_ratio']:.2f}"
+        )
+
+
 if __name__ == "__main__":
 
     for node in NODES:
@@ -90,3 +107,5 @@ if __name__ == "__main__":
         print(
             f"Generated {filename}"
         )
+
+    print_fast_path_prediction()

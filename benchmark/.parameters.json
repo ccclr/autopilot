@@ -1,13 +1,27 @@
 {
-    "affected_nodes": [],
+    "affected_nodes": [
+        4
+    ],
     "aggregation_strategy": "normal",
-    "applied_begin": 56,
+    "applied_begin": 30,
     "asynchrony_duration": [
         3000
     ],
-    "asynchrony_nodes": [],
+    "asynchrony_node_ids_per_window": [
+        [
+            0,
+            1,
+            2,
+            3
+        ]
+    ],
+    "asynchrony_nodes": [
+        4
+    ],
     "asynchrony_regions": [
-        []
+        [
+            "Clem"
+        ]
     ],
     "asynchrony_start": [
         0
@@ -24,26 +38,26 @@
     "egress_penalty": 0,
     "egress_penalty_per_node": [
         0,
-        0,
-        0,
-        0
+        20,
+        120,
+        160
     ],
-    "epoch_slots": 60,
-    "fast_path_timeout": 100,
+    "epoch_slots": 32,
+    "fast_path_timeout": 50,
     "gc_depth": 50,
     "header_size": 32,
-    "k": 4,
+    "k": 1,
     "max_batch_delay": 5000,
     "max_header_delay": 5000,
-    "simulate_asynchrony": false,
+    "simulate_asynchrony": true,
     "sync_retry_delay": 5000,
     "sync_retry_nodes": 3,
     "timeout_delay": 5000,
-    "use_exponential_timeouts": false,
+    "use_exponential_timeouts": true,
     "use_fast_path": true,
     "use_fast_sync": true,
     "use_optimistic_tips": true,
     "use_parallel_proposals": true,
     "use_ride_share": false,
-    "window_size": 12
+    "window_size": 16
 }
