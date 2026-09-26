@@ -11,6 +11,8 @@ from os.path import basename, splitext, join
 from time import sleep, time
 from math import ceil
 from copy import deepcopy
+from pathlib import Path
+import shlex
 import subprocess
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
@@ -37,7 +39,7 @@ class Bench:
     def __init__(self, ctx):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
-        self.home = f'/home/{self.settings.username}'
+        self.home = self.settings.home
         CommandMaker.set_home(self.home)
         try:
             ctx.connect_kwargs.pkey = RSAKey.from_private_key_file(
@@ -374,7 +376,7 @@ class Bench:
 
         return committee
 
-    def _run_single(self, rate, committee, bench_parameters, node_parameters, debug=False, node_regions=None):
+    def _run_single(self, rate, committee, bench_parameters, node_parameters, debug=False, node_regions=None, start_controller=True):
         faults = bench_parameters.faults
         node_regions = node_regions or []
         region_based_asynchrony = node_parameters.json.get('simulate_asynchrony', False)
@@ -547,52 +549,56 @@ class Bench:
         Print.info('Waiting for all workers to be ready...')
         self._wait_for_tcp_listeners(worker_listener_addresses, timeout_sec=90, label='workers')
 
-        # Start controller for RL training.
-        Print.info('Starting RL controllers...')
-        resume_from = getattr(bench_parameters, 'cmab_resume_from', None)
-        rl_algo = getattr(bench_parameters, 'rl_algo', 'cmab')
-        cmab_action_encoding = getattr(
-            bench_parameters, 'cmab_action_encoding', 'numeric'
-        )
-        cmab_seed = getattr(bench_parameters, 'cmab_seed', 0)
-        warmup_iterations = getattr(bench_parameters, 'rl_warmup_iterations', 5)
-        enable_accelerator = getattr(bench_parameters, 'enable_accelerator', False)
-        accelerator_period = getattr(bench_parameters, 'accelerator_period', 100)
-        cmab_policy = getattr(bench_parameters, 'cmab_policy', 'rf_ts')
-        cmab_start_pos = getattr(bench_parameters, 'cmab_start_pos', 0)
-        Print.info(f'RL algo: {rl_algo}')
-        if rl_algo in ('cmab', 'xgboost'):
-            Print.info(f'Action encoding: {cmab_action_encoding}')
-        Print.info(f'CMAB seed: {cmab_seed}')
-        Print.info(f'RL warmup iterations: {warmup_iterations}')
-        Print.info(f'CMAB policy: {cmab_policy}')
-        Print.info(f'CMAB start pos: {cmab_start_pos}')
-        Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
-        if resume_from:
-            Print.info(f'RL resume-from: {resume_from}')
-        for i, address in enumerate(primary_addresses):
-            host = Committee.ip(address)
-            cmd = CommandMaker.run_controller(
-                node_index=i,
-                repo_name=self.settings.repo_name,
-                log_dir=PathMaker.logs_path(),
-                parameters_file=f'{self.home}/.parameters.json',
-                python_bin=CommandMaker.agent_venv_python(),
-                resume_from=resume_from,
-                rl_algo=rl_algo,
-                cmab_action_encoding=(
-                    cmab_action_encoding if rl_algo in ('cmab', 'xgboost') else None
-                ),
-                cmab_seed=cmab_seed,
-                warmup_iterations=warmup_iterations,
-                enable_accelerator=enable_accelerator,
-                accelerator_period=accelerator_period,
-                cmab_policy=(cmab_policy if rl_algo == 'cmab' else None),
-                cmab_start_pos=(cmab_start_pos if rl_algo == 'cmab' else None),
+        # Start controller for RL training. The FPT sweep passes
+        # start_controller=False so the timeout grid stays frozen.
+        if not start_controller:
+            Print.info('Skipping RL controllers')
+        else:
+            Print.info('Starting RL controllers...')
+            resume_from = getattr(bench_parameters, 'cmab_resume_from', None)
+            rl_algo = getattr(bench_parameters, 'rl_algo', 'cmab')
+            cmab_action_encoding = getattr(
+                bench_parameters, 'cmab_action_encoding', 'numeric'
             )
-            log_file = join(PathMaker.logs_path(), f'controller-{i}.log')
-            self._background_run(host, cmd, log_file)
-        sleep(2)
+            cmab_seed = getattr(bench_parameters, 'cmab_seed', 0)
+            warmup_iterations = getattr(bench_parameters, 'rl_warmup_iterations', 5)
+            enable_accelerator = getattr(bench_parameters, 'enable_accelerator', False)
+            accelerator_period = getattr(bench_parameters, 'accelerator_period', 100)
+            cmab_policy = getattr(bench_parameters, 'cmab_policy', 'rf_ts')
+            cmab_start_pos = getattr(bench_parameters, 'cmab_start_pos', 0)
+            Print.info(f'RL algo: {rl_algo}')
+            if rl_algo in ('cmab', 'xgboost'):
+                Print.info(f'Action encoding: {cmab_action_encoding}')
+            Print.info(f'CMAB seed: {cmab_seed}')
+            Print.info(f'RL warmup iterations: {warmup_iterations}')
+            Print.info(f'CMAB policy: {cmab_policy}')
+            Print.info(f'CMAB start pos: {cmab_start_pos}')
+            Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
+            if resume_from:
+                Print.info(f'RL resume-from: {resume_from}')
+            for i, address in enumerate(primary_addresses):
+                host = Committee.ip(address)
+                cmd = CommandMaker.run_controller(
+                    node_index=i,
+                    repo_name=self.settings.repo_name,
+                    log_dir=PathMaker.logs_path(),
+                    parameters_file=f'{self.home}/.parameters.json',
+                    python_bin=CommandMaker.agent_venv_python(),
+                    resume_from=resume_from,
+                    rl_algo=rl_algo,
+                    cmab_action_encoding=(
+                        cmab_action_encoding if rl_algo in ('cmab', 'xgboost') else None
+                    ),
+                    cmab_seed=cmab_seed,
+                    warmup_iterations=warmup_iterations,
+                    enable_accelerator=enable_accelerator,
+                    accelerator_period=accelerator_period,
+                    cmab_policy=(cmab_policy if rl_algo == 'cmab' else None),
+                    cmab_start_pos=(cmab_start_pos if rl_algo == 'cmab' else None),
+                )
+                log_file = join(PathMaker.logs_path(), f'controller-{i}.log')
+                self._background_run(host, cmd, log_file)
+            sleep(2)
 
         # Now that primaries are running and sockets are created, start metrics collectors.
         Print.info('Starting metrics collectors...')
@@ -732,7 +738,7 @@ class Bench:
         Print.info('Parsing logs and computing performance...')
         return LogParser.process(PathMaker.logs_path(), faults=faults)
 
-    def run(self, bench_parameters_dict, node_parameters_dict, debug=False):
+    def run(self, bench_parameters_dict, node_parameters_dict, debug=False, start_controller=True):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
@@ -901,7 +907,8 @@ class Bench:
                     try:
                         self._run_single(
                             r, committee_copy, bench_parameters, node_parameters, debug,
-                            node_regions=run_node_regions
+                            node_regions=run_node_regions,
+                            start_controller=start_controller,
                         )
 
                         faults = bench_parameters.faults

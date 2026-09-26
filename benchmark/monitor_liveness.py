@@ -270,7 +270,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--settings",
         type=Path,
-        default=_script_dir() / "cloudlab_settings.json",
+        default=_script_dir() / "settings.json",
     )
     p.add_argument("--benchmark-dir", type=Path, default=_script_dir())
     p.add_argument("--fab-bin", default=os.environ.get("FAB", "fab"))

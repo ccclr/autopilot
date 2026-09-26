@@ -15,7 +15,8 @@ from paramiko.ssh_exception import PasswordRequiredException, SSHException
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "benchmark"))
 
-from benchmark.cloudlab_settings import CloudLabSettings, CloudLabSettingsError
+from benchmark.gcp_instance import InstanceManager
+from benchmark.utils import BenchError
 
 # Runs on each host. Match /proc cmdline, never pkill -f (that kills the SSH
 # wrapper because the pattern appears in the remote command line).
@@ -66,9 +67,9 @@ def _script_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _load_ssh_connect_kwargs(settings: CloudLabSettings) -> dict:
+def _load_ssh_connect_kwargs(settings) -> dict:
     try:
-        password = settings.ssh_key_password or os.environ.get("SSH_KEY_PASSWORD")
+        password = getattr(settings, "ssh_key_password", None) or os.environ.get("SSH_KEY_PASSWORD")
         if password:
             pkey = RSAKey.from_private_key_file(settings.key_path, password=password)
         else:
@@ -88,13 +89,14 @@ def _remote_kill_command() -> str:
 
 def kill_all(settings_path: Path) -> None:
     try:
-        settings = CloudLabSettings.load(str(settings_path))
-    except (OSError, CloudLabSettingsError) as e:
+        manager = InstanceManager.make(str(settings_path))
+    except BenchError as e:
         raise RuntimeError(f"Failed to load settings {settings_path}: {e}") from e
 
-    hosts = [h["hostname"] for h in settings.hosts]
+    settings = manager.settings
+    hosts = manager.hosts(flat=True)
     if not hosts:
-        raise RuntimeError(f"No hosts in {settings_path}")
+        raise RuntimeError(f"No running instances for {settings_path}")
 
     connect = _load_ssh_connect_kwargs(settings)
     cmd = _remote_kill_command()
@@ -120,8 +122,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Kill autopilot processes on all remote hosts")
     parser.add_argument(
         "--settings",
-        default=str(_script_dir() / "cloudlab_settings.json"),
-        help="Path to cloudlab settings JSON (default: ./cloudlab_settings.json)",
+        default=str(_script_dir() / "settings.json"),
+        help="Path to GCP settings JSON (default: ./settings.json)",
     )
     args = parser.parse_args()
 

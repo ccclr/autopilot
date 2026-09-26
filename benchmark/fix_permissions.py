@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Fix CloudLab leftover-owner permissions so `fab remote` / FPT sweep can boot.
+"""Fix leftover-owner permissions so `fab remote` / FPT sweep can boot.
 
-Many /local paths and /tmp sockets were created by another user (e.g. AlanXiao).
-This user cannot overwrite logs, delete sticky-bit sockets in /tmp, or rsync
-directory mtimes, which shows up as:
-
-  Timeout while waiting for primaries to start listening: 10.10.1.1:5001, ...
+Logs, repos, and /tmp sockets may be owned by another user. This user then
+cannot overwrite logs or delete sticky-bit sockets in /tmp.
 
 Usage (from benchmark/):
   python3 fix_permissions.py
-  python3 fix_permissions.py --settings cloudlab_settings.json
+  python3 fix_permissions.py --settings settings.json
 """
 
 from __future__ import annotations
@@ -28,16 +25,17 @@ from paramiko.ssh_exception import PasswordRequiredException, SSHException
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "benchmark"))
 
-from benchmark.cloudlab_settings import CloudLabSettings, CloudLabSettingsError
+from benchmark.gcp_instance import InstanceManager
+from benchmark.utils import BenchError
 
 # Applied on every host. HOME_DIR is injected by the Python wrapper.
 _REMOTE_FIX = r"""
 set -euo pipefail
-HOME_DIR="${HOME_DIR:-/local}"
+HOME_DIR="${HOME_DIR:-/home/ccclr0302}"
 
 fix_git_safe() {
   local path
-  for path in /local/autopilot /local/autopilot-test "$HOME_DIR/autopilot" "$HOME_DIR/autopilot-test" "*"; do
+  for path in "$HOME_DIR/autopilot" "$HOME_DIR/autopilot-test" "*"; do
     sudo git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "$path" \
       || sudo git config --system --add safe.directory "$path"
   done
@@ -77,7 +75,7 @@ sudo rm -f \
 
 fix_git_safe
 
-# Prove this user can tee primary logs (boot path: ./node |& tee /local/logs/...).
+# Prove this user can tee primary logs (boot path: ./node |& tee $HOME_DIR/logs/...).
 touch "$HOME_DIR/logs/.perm_check" && rm -f "$HOME_DIR/logs/.perm_check"
 
 echo "logs_writable=yes git_safe=yes sockets_cleared=yes"
@@ -88,9 +86,9 @@ def _script_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _load_ssh_connect_kwargs(settings: CloudLabSettings) -> dict:
+def _load_ssh_connect_kwargs(settings) -> dict:
     try:
-        password = settings.ssh_key_password or os.environ.get("SSH_KEY_PASSWORD")
+        password = getattr(settings, "ssh_key_password", None) or os.environ.get("SSH_KEY_PASSWORD")
         if password:
             pkey = RSAKey.from_private_key_file(settings.key_path, password=password)
         else:
@@ -115,13 +113,14 @@ def _tighten_ssh_key(key_path: str) -> None:
 
 def fix_all(settings_path: Path) -> None:
     try:
-        settings = CloudLabSettings.load(str(settings_path))
-    except (OSError, CloudLabSettingsError) as e:
+        manager = InstanceManager.make(str(settings_path))
+    except BenchError as e:
         raise RuntimeError(f"Failed to load settings {settings_path}: {e}") from e
 
-    hosts = [h["hostname"] for h in settings.hosts]
+    settings = manager.settings
+    hosts = manager.hosts(flat=True)
     if not hosts:
-        raise RuntimeError(f"No hosts in {settings_path}")
+        raise RuntimeError(f"No running instances for {settings_path}")
 
     print(f"Tightening local SSH key {settings.key_path}")
     _tighten_ssh_key(settings.key_path)
@@ -152,12 +151,12 @@ def fix_all(settings_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Fix leftover file/socket permissions on all CloudLab hosts"
+        description="Fix leftover file/socket permissions on all GCP hosts"
     )
     parser.add_argument(
         "--settings",
-        default=str(_script_dir() / "cloudlab_settings.json"),
-        help="Path to cloudlab settings JSON (default: ./cloudlab_settings.json)",
+        default=str(_script_dir() / "settings.json"),
+        help="Path to GCP settings JSON (default: ./settings.json)",
     )
     args = parser.parse_args()
 

@@ -222,7 +222,7 @@ def parse_args() -> argparse.Namespace:
     home = Path.home()
     p = argparse.ArgumentParser(description="CMAB numeric vs one_hot encoding sweep")
     p.add_argument("--home", type=Path, default=home)
-    p.add_argument("--settings", type=Path, default=_script_dir() / "cloudlab_settings.json")
+    p.add_argument("--settings", type=Path, default=_script_dir() / "settings.json")
     p.add_argument("--benchmark-dir", type=Path, default=_script_dir())
     p.add_argument("--fab-bin", default=os.environ.get("FAB", "fab"))
     p.add_argument("--target-epoch", type=int, default=150)

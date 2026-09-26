@@ -34,13 +34,13 @@ from invoke import Context
 # Ensure local package imports work when run as a script.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "benchmark"))
 
-from benchmark.cloudlab_remote import CloudLabBench as Bench
+from benchmark.remote import Bench
 from benchmark.utils import BenchError, PathMaker, Print
 
 
 # Frozen copy of fabfile.remote() params (do not set runs>1).
 # Plateau verification: freeze everything except fast_path_timeout.
-# RL controller is commented out in cloudlab_remote.py; keep rl_algo unused.
+# Bench.run(start_controller=False) keeps the RL controller off.
 BENCH_PARAMS = {
     "faults": 0,
     "nodes": [4],
@@ -86,14 +86,15 @@ NODE_PARAMS = {
     "cut_condition_type": 3,
     # VoteDelay: each node delays its own ConsensusVote by the per-node
     # penalty below (index == node index). Window covers the whole run.
-    # Format is window -> region -> per-node (see cloudlab_remote.run).
+    # Format is window -> region -> per-node (see remote.run).
+    # asynchrony_regions is filled from settings.json at run time.
     "simulate_asynchrony": True,
     "asynchrony_type": [6],
     "asynchrony_start": [0],
     "asynchrony_duration": [3000],
     "affected_nodes": [4],
     "asynchrony_nodes": [4],
-    "asynchrony_regions": [["Clem"]],
+    "asynchrony_regions": [[]],
     "egress_penalty": [[[0, 20, 120, 160]]],
     "use_fast_sync": True,
     "use_exponential_timeouts": True,
@@ -177,15 +178,22 @@ def _archive_is_valid(path: Path, timeout: int) -> bool:
     return got == timeout and e2e is not None and has_ratio
 
 
+def _gcp_zone() -> str:
+    from benchmark.settings import Settings
+
+    settings = Settings.load(str(_script_dir() / "settings.json"))
+    return settings.regions[0]
+
+
 def _local_metrics_home() -> Path:
     """Home that contains metrics-* directories (settings.home, else $HOME)."""
     try:
-        from benchmark.cloudlab_settings import CloudLabSettings
+        from benchmark.settings import Settings
 
-        settings = CloudLabSettings.load(str(_script_dir() / "cloudlab_settings.json"))
+        settings = Settings.load(str(_script_dir() / "settings.json"))
         return Path(settings.home)
     except Exception:
-        return Path(os.environ.get("HOME", "/users/clr0302"))
+        return Path(os.environ.get("HOME", "/home/ccclr0302"))
 
 
 def _discover_local_metrics_dirs(home: Path) -> list[Path]:
@@ -444,6 +452,7 @@ def _run_one_trial(
         size_before = result_path.stat().st_size if result_path.exists() else 0
         node_params = deepcopy(NODE_PARAMS)
         node_params["fast_path_timeout"] = timeout
+        node_params["asynchrony_regions"] = [[_gcp_zone()]]
         bench_params = deepcopy(BENCH_PARAMS)
 
         Print.heading(
@@ -452,7 +461,7 @@ def _run_one_trial(
         )
         try:
             ctx = _make_ctx()
-            Bench(ctx).run(bench_params, node_params, debug)
+            Bench(ctx).run(bench_params, node_params, debug, start_controller=False)
             archived = _archive_summary(
                 result_path, archive_dir, timeout, trial, size_before
             )

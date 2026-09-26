@@ -219,6 +219,10 @@ class InstanceManager:
         except ClientError as e:
             raise BenchError('Failed to gather instances IPs', GCPError(e))
 
+    def internal_hosts(self, flat=False):
+        """Internal VPC addresses. hosts() already returns network_i_p."""
+        return self.hosts(flat=flat)
+
 
     def print_info(self):
         hosts = self.hosts(False)

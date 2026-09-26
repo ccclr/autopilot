@@ -37,6 +37,7 @@ class Settings:
         self.project_id = project_id
         self.templates = templates
         self.username = username
+        self.home = f'/home/{username}'
 
     @classmethod
     def load(cls, filename):

@@ -8,9 +8,9 @@ from benchmark.utils import PathMaker
 
 
 class CommandMaker:
-    # Default matches cloudlab_settings.json "home"; runtime override via set_home().
-    HOME = '/local'
-    AGENT_VENV_PATH = '/local/autopilot-venv'
+    # GCP login home. Bench.__init__ overrides this via set_home().
+    HOME = f"/home/{os.environ.get('USER', 'ccclr0302')}"
+    AGENT_VENV_PATH = f'{HOME}/autopilot-venv'
 
     @classmethod
     def set_home(cls, home):

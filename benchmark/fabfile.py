@@ -20,8 +20,8 @@ from benchmark.local import LocalBench
 from benchmark.logs import ParseError, LogParser
 from benchmark.utils import Print, BenchError
 from benchmark.plot import Ploter, PlotError
-from benchmark.cloudlab_instance import CloudLabInstanceManager as InstanceManager
-from benchmark.cloudlab_remote import CloudLabBench as Bench
+from benchmark.gcp_instance import InstanceManager
+from benchmark.remote import Bench
 from fabric.transfer import Transfer
 from paramiko import RSAKey, SSHException
 from invoke.exceptions import UnexpectedExit
@@ -183,7 +183,7 @@ def remote(
     cmab_policy='combined',
     cmab_start_pos=0,
 ):
-    ''' Run benchmarks on CloudLab. '''
+    ''' Run benchmarks on GCP. '''
     encoding = str(cmab_action_encoding).lower()
     if encoding not in ('numeric', 'one_hot'):
         raise ValueError('cmab_action_encoding must be "numeric" or "one_hot"')
@@ -195,6 +195,7 @@ def remote(
             'cmab_policy must be one of rf_ts, random, default, '
             'round_robin, factorized, combined'
         )
+    zone = InstanceManager.make().settings.regions[0]
     try:
         start_pos = int(cmab_start_pos)
     except (TypeError, ValueError) as exc:
@@ -240,7 +241,7 @@ def remote(
         
         'enable_hotspot': False,
         'hotspot_windows': [[0, 3000]],
-        'hotspot_regions': [['Clem']],
+        'hotspot_regions': [[zone]],
         'hotspot_nodes': [[2]],
         'hotspot_region_rates': [[[0.99, 0.99]]], 
     }
@@ -274,8 +275,8 @@ def remote(
         'asynchrony_duration': [120],  # s
         'affected_nodes': [4],
         'asynchrony_nodes': [4],
-        'asynchrony_regions': [['Clem']],
-        'egress_penalty': [[0, 10, 30, 70]],
+        'asynchrony_regions': [[zone]],
+        'egress_penalty': [[[0, 10, 30, 70]]],
 
         'use_fast_sync': True,
         'use_exponential_timeouts': False,
@@ -434,10 +435,9 @@ def _parse_current_node_from_logs(log_dir='../../logs'):
 
 
 def _get_nodes_from_fab_info():
-    """Get node metadata (name, region, ip) from CloudLab InstanceManager/fab info."""
+    """Get node metadata (name, zone, ip) from the GCP InstanceManager."""
     manager = InstanceManager.make()
-    # GCP: ids_by_region, ips_by_region = manager._get(['STAGING', 'RUNNING'])
-    ids_by_region, ips_by_region = manager._get()
+    ids_by_region, ips_by_region = manager._get(['STAGING', 'RUNNING'])
 
     nodes = []
     for region in sorted(ips_by_region.keys()):
@@ -474,8 +474,7 @@ def _detect_current_node_from_fab_info(nodes):
         if node["ip"] in local_ips:
             return node
 
-    # CloudLab often runs fab from a control node (e.g. 10.10.1.1 / node0)
-    # that is not listed in cloudlab_settings hosts. Prefer the experiment LAN.
+    # fab may run on a control VM whose address is not in the instance list.
     preferred = sorted(
         local_ips,
         key=lambda ip: (0 if ip.startswith('10.') else 1, ip),
@@ -488,9 +487,9 @@ def _detect_current_node_from_fab_info(nodes):
 
 
 def _ssh_connect_settings():
-    """Load SSH key/username from cloudlab_settings.json."""
+    """Load SSH key/username from settings.json."""
     settings = InstanceManager.make().settings
-    password = settings.ssh_key_password or os.environ.get('SSH_KEY_PASSWORD')
+    password = getattr(settings, 'ssh_key_password', None) or os.environ.get('SSH_KEY_PASSWORD')
     if password:
         pkey = RSAKey.from_private_key_file(settings.key_path, password=password)
     else:

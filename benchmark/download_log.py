@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""从远程节点下载 benchmark 日志（对齐 remote.py / cloudlab_remote.py 的 _logs 逻辑）。
+"""从远程节点下载 benchmark 日志（对齐 remote.py 的 _logs 逻辑）。
 
 用法（在 benchmark 目录下）:
   python3 download_log.py
-  python3 download_log.py --settings cloudlab_settings.json --faults 0
+  python3 download_log.py --settings settings.json --faults 0
   python3 download_log.py --extra --parse
 """
 
@@ -24,7 +24,7 @@ from paramiko.ssh_exception import PasswordRequiredException, SSHException
 # 与 analyze_logs.py 一样，保证可导入 benchmark.*
 sys.path.append(os.path.join(os.path.dirname(__file__), "benchmark"))
 
-from benchmark.cloudlab_settings import CloudLabSettings, CloudLabSettingsError
+from benchmark.settings import Settings, SettingsError
 from benchmark.commands import CommandMaker
 from benchmark.config import Committee, Key
 from benchmark.logs import LogParser, ParseError
@@ -35,9 +35,9 @@ def _script_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _load_ssh_connect_kwargs(settings: CloudLabSettings) -> dict:
+def _load_ssh_connect_kwargs(settings: Settings) -> dict:
     try:
-        password = settings.ssh_key_password or os.environ.get("SSH_KEY_PASSWORD")
+        password = getattr(settings, "ssh_key_password", None) or os.environ.get("SSH_KEY_PASSWORD")
         if password:
             pkey = RSAKey.from_private_key_file(settings.key_path, password=password)
         else:
@@ -117,14 +117,14 @@ def _safe_get(conn: Connection, remote: str, local: str) -> bool:
 
 
 def download_logs(
-    settings: CloudLabSettings,
+    settings: Settings,
     connect_kwargs: dict,
     committee: Committee,
     faults: int = 0,
     clean_local: bool = True,
     extra: bool = False,
 ) -> str:
-    """对齐 CloudLabBench._logs / Bench._logs 的下载逻辑。"""
+    """对齐 Bench._logs 的下载逻辑。日志位于 settings.home。"""
     CommandMaker.set_home(settings.home)
 
     if clean_local:
@@ -205,12 +205,12 @@ def download_logs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="从远程 CloudLab 节点下载 primary/worker/client 日志"
+        description="从远程 GCP 节点下载 primary/worker/client 日志"
     )
     parser.add_argument(
         "--settings",
-        default=str(_script_dir() / "cloudlab_settings.json"),
-        help="CloudLab settings 路径，默认 ./cloudlab_settings.json",
+        default=str(_script_dir() / "settings.json"),
+        help="GCP settings 路径，默认 ./settings.json",
     )
     parser.add_argument(
         "--committee",
@@ -249,7 +249,7 @@ def main() -> None:
     os.chdir(workdir)
 
     try:
-        settings = CloudLabSettings.load(args.settings)
+        settings = Settings.load(args.settings)
         connect_kwargs = _load_ssh_connect_kwargs(settings)
         committee = _load_committee(Path(args.committee), workdir)
 
@@ -272,8 +272,8 @@ def main() -> None:
             Print.info("Parsing logs and computing performance...")
             result = LogParser.process(logs_dir, faults=args.faults)
             print(result.result())
-    except CloudLabSettingsError as e:
-        Print.error(BenchError("Failed to load CloudLab settings", e))
+    except SettingsError as e:
+        Print.error(BenchError("Failed to load GCP settings", e))
         sys.exit(1)
     except ParseError as e:
         Print.error(BenchError("Failed to parse logs", e))

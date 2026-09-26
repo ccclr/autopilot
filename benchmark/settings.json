@@ -7,7 +7,7 @@
     "repo": {
         "name": "autopilot",
         "url": "git@github.com:ccclr/autopilot.git",
-        "branch": "test"
+        "branch": "gcp"
     },
     "project_id": "bright-meridian-486618-b3",
     "username": "ccclr0302",
@@ -15,7 +15,7 @@
         "type": "t2d-standard-2",
         "regions": ["asia-east2-a"],
         "templates": [
-            "projects/just-creek-462112-j2/regions/asia-east1/instanceTemplates/autobahn-template-asia-east1",
+            "projects/just-creek-462112-j2/regions/asia-east1/instanceTemplates/autobahn-template-asia-east1"
         ]
     }
 }
