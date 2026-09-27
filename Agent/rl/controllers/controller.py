@@ -110,6 +110,28 @@ class AutopilotController:
         accelerator_period: int = 100,
         cmab_policy: str = "rf_ts",
         cmab_start_pos: int = 0,
+        max_training_iterations: Optional[int] = None,
+        dqn_action_endpoints: Optional[str] = None,
+        dqn_action_timeout: float = 2.0,
+        dqn_action_retries: int = 2,
+        dqn_learning_rate: float = 1e-3,
+        dqn_gamma: float = 0.90,
+        dqn_replay_capacity: int = 2000,
+        dqn_batch_size: int = 32,
+        dqn_learning_starts: int = 32,
+        dqn_target_update_interval: int = 20,
+        dqn_epsilon_start: float = 1.0,
+        dqn_epsilon_end: float = 0.05,
+        dqn_epsilon_decay_steps: int = 200,
+        dqn_gradient_updates: int = 1,
+        dqn_gradient_clip: float = 10.0,
+        dqn_hidden_dim: int = 64,
+        dqn_seed: int = 0,
+        dqn_checkpoint_load_mode: str = "resume",
+        cmab_transition_export_dir: Optional[str] = None,
+        cmab_environment_label: str = "unlabeled",
+        cmab_transition_run_id: Optional[str] = None,
+        enable_cmab_cut_fpt_cross_feature: bool = False,
     ):
         """
         Initialize controller
@@ -162,8 +184,42 @@ class AutopilotController:
         self.cmab_start_pos = int(cmab_start_pos)
         if self.cmab_start_pos < 0:
             raise ValueError("CMAB start pos must be an integer >= 0")
-        if self.rl_algo not in ("cmab", "xgboost", "gp_bo", "kernel_ucb"):
+        if self.rl_algo not in ("cmab", "xgboost", "gp_bo", "kernel_ucb", "dqn"):
             raise ValueError(f"Unsupported rl_algo: {self.rl_algo}")
+        self.max_training_iterations = max_training_iterations
+        if max_training_iterations is not None and max_training_iterations <= 0:
+            raise ValueError("max_training_iterations must be positive or None")
+        self.enable_cmab_cut_fpt_cross_feature = bool(enable_cmab_cut_fpt_cross_feature)
+        if self.enable_cmab_cut_fpt_cross_feature and (
+            self.rl_algo != "cmab" or self.cmab_policy in ("factorized", "combined")
+        ):
+            raise ValueError("Cut-FPT cross features require the standard CMAB policy")
+        self.dqn_action_endpoints = dqn_action_endpoints
+        self.dqn_action_timeout = float(dqn_action_timeout)
+        self.dqn_action_retries = int(dqn_action_retries)
+        self.dqn_learning_rate = float(dqn_learning_rate)
+        self.dqn_gamma = float(dqn_gamma)
+        self.dqn_replay_capacity = int(dqn_replay_capacity)
+        self.dqn_batch_size = int(dqn_batch_size)
+        self.dqn_learning_starts = int(dqn_learning_starts)
+        self.dqn_target_update_interval = int(dqn_target_update_interval)
+        self.dqn_epsilon_start = float(dqn_epsilon_start)
+        self.dqn_epsilon_end = float(dqn_epsilon_end)
+        self.dqn_epsilon_decay_steps = int(dqn_epsilon_decay_steps)
+        self.dqn_gradient_updates = int(dqn_gradient_updates)
+        self.dqn_gradient_clip = float(dqn_gradient_clip)
+        self.dqn_hidden_dim = int(dqn_hidden_dim)
+        self.dqn_seed = int(dqn_seed)
+        if dqn_checkpoint_load_mode not in ("resume", "finetune"):
+            raise ValueError(
+                "DQN checkpoint load mode must be 'resume' or 'finetune'"
+            )
+        self.dqn_checkpoint_load_mode = dqn_checkpoint_load_mode
+        self.cmab_transition_export_dir = cmab_transition_export_dir
+        self.cmab_environment_label = cmab_environment_label or "unlabeled"
+        self.cmab_transition_run_id = cmab_transition_run_id
+        if self.rl_algo == "dqn" and (self.node_index != 0 or not self.dqn_action_endpoints):
+            raise ValueError("DQN requires node0 and action endpoints")
         # Agent/rl root (parent of controllers/)
         self._rl_root = Path(__file__).resolve().parent.parent
 
@@ -203,6 +259,8 @@ class AutopilotController:
         self._start_continuous_training_subprocess()
 
     def _training_script_name(self) -> str:
+        if self.rl_algo == "dqn":
+            return "train_dqn.py"
         if self.rl_algo == "gp_bo":
             return "train_gp_bo.py"
         if self.rl_algo == "kernel_ucb":
@@ -213,12 +271,16 @@ class AutopilotController:
 
     def _checkpoint_dir(self) -> Path:
         home = Path.home()
+        if self.rl_algo == "dqn":
+            return self.metrics_dir.parent / "dqn_checkpoints" / "state_action_q_v1"
         if self.rl_algo == "gp_bo":
             return home / "gp_bo_checkpoints"
         if self.rl_algo == "kernel_ucb":
             return home / "kernel_ucb_checkpoints"
         if self.rl_algo == "xgboost":
             return home / "xgboost_checkpoints"
+        if self.rl_algo == "cmab" and self.enable_cmab_cut_fpt_cross_feature:
+            return home / "checkpoints" / f"cmab_{self.cmab_action_encoding}_cut_fpt"
         if self.rl_algo == "cmab" and self.cmab_policy == "factorized":
             return home / "checkpoints" / "cmab_factorized"
         if self.rl_algo == "cmab" and self.cmab_policy == "combined":
@@ -250,9 +312,10 @@ class AutopilotController:
                 "--parameters-file", str(self.parameters_file),
                 "--checkpoint-dir", str(checkpoint_dir),
                 "--warmup-iterations", str(self.warmup_iterations),
-                "--accelerator-period", str(self.accelerator_period),
             ]
-            if self.enable_accelerator:
+            if self.rl_algo != "dqn":
+                cmd.extend(["--accelerator-period", str(self.accelerator_period)])
+            if self.enable_accelerator and self.rl_algo != "dqn":
                 cmd.append("--enable-accelerator")
             if self.rl_algo == "cmab":
                 cmd.extend(["--policy", str(self.cmab_policy)])
@@ -261,10 +324,56 @@ class AutopilotController:
                 cmd.extend(
                     ["--action-encoding", str(self.cmab_action_encoding)]
                 )
-            cmd.extend(["--seed", str(self.cmab_seed)])
-            cmd.extend(["--num-iterations", "2500"])
+            if self.rl_algo != "dqn":
+                cmd.extend(["--seed", str(self.cmab_seed)])
+            if self.max_training_iterations is not None:
+                cmd.extend(["--num-iterations", str(self.max_training_iterations)])
+            elif self.rl_algo != "dqn":
+                cmd.extend(["--num-iterations", "2500"])
             if self.resume_from:
                 cmd.extend(["--resume-from", str(self.resume_from)])
+
+            if (
+                self.rl_algo == "cmab"
+                and self.enable_cmab_cut_fpt_cross_feature
+            ):
+                cmd.append("--enable-cut-fpt-cross-feature")
+            if self.rl_algo == "cmab" and self.cmab_transition_export_dir:
+                cmd.extend(
+                    [
+                        "--transition-export-dir",
+                        str(self.cmab_transition_export_dir),
+                        "--environment-label",
+                        str(self.cmab_environment_label),
+                    ]
+                )
+                if self.cmab_transition_run_id:
+                    cmd.extend(["--run-id", str(self.cmab_transition_run_id)])
+            if self.rl_algo == "dqn":
+                cmd.extend(
+                    [
+                        "--action-endpoints", str(self.dqn_action_endpoints),
+                        "--action-timeout", str(self.dqn_action_timeout),
+                        "--action-retries", str(self.dqn_action_retries),
+                        "--learning-rate", str(self.dqn_learning_rate),
+                        "--gamma", str(self.dqn_gamma),
+                        "--replay-capacity", str(self.dqn_replay_capacity),
+                        "--batch-size", str(self.dqn_batch_size),
+                        "--learning-starts", str(self.dqn_learning_starts),
+                        "--target-update-interval",
+                        str(self.dqn_target_update_interval),
+                        "--epsilon-start", str(self.dqn_epsilon_start),
+                        "--epsilon-end", str(self.dqn_epsilon_end),
+                        "--epsilon-decay-steps",
+                        str(self.dqn_epsilon_decay_steps),
+                        "--gradient-updates", str(self.dqn_gradient_updates),
+                        "--gradient-clip", str(self.dqn_gradient_clip),
+                        "--hidden-dim", str(self.dqn_hidden_dim),
+                        "--seed", str(self.dqn_seed),
+                        "--checkpoint-load-mode",
+                        str(self.dqn_checkpoint_load_mode),
+                    ]
+                )
 
             logger.info(f"Starting continuous training with command: {' '.join(cmd)}")
 
@@ -377,7 +486,7 @@ def main():
     parser.add_argument('--resume-from', type=str, default=None,
                        help='Resume RL policy from checkpoint path')
     parser.add_argument('--rl-algo', type=str, default='cmab',
-                       choices=['cmab', 'xgboost', 'gp_bo', 'kernel_ucb'],
+                       choices=['cmab', 'xgboost', 'gp_bo', 'kernel_ucb', 'dqn'],
                        help='RL algorithm: cmab (RF-TS), xgboost, gp_bo (GP-UCB), or kernel_ucb')
     parser.add_argument(
         '--cmab-action-encoding',
@@ -430,6 +539,33 @@ def main():
         help='Epochs between master latency probes (apply 5 epochs later)',
     )
 
+    parser.add_argument("--max-training-iterations", type=int, default=None)
+    parser.add_argument("--enable-cmab-cut-fpt-cross-feature", action="store_true")
+    parser.add_argument('--dqn-action-endpoints', type=str, default=None)
+    parser.add_argument('--dqn-action-timeout', type=float, default=2.0)
+    parser.add_argument('--dqn-action-retries', type=int, default=2)
+    parser.add_argument('--dqn-learning-rate', type=float, default=1e-3)
+    parser.add_argument('--dqn-gamma', type=float, default=0.90)
+    parser.add_argument('--dqn-replay-capacity', type=int, default=2000)
+    parser.add_argument('--dqn-batch-size', type=int, default=32)
+    parser.add_argument('--dqn-learning-starts', type=int, default=32)
+    parser.add_argument('--dqn-target-update-interval', type=int, default=20)
+    parser.add_argument('--dqn-epsilon-start', type=float, default=1.0)
+    parser.add_argument('--dqn-epsilon-end', type=float, default=0.05)
+    parser.add_argument('--dqn-epsilon-decay-steps', type=int, default=200)
+    parser.add_argument('--dqn-gradient-updates', type=int, default=1)
+    parser.add_argument('--dqn-gradient-clip', type=float, default=10.0)
+    parser.add_argument('--dqn-hidden-dim', type=int, default=64)
+    parser.add_argument('--dqn-seed', type=int, default=0)
+    parser.add_argument(
+        '--dqn-checkpoint-load-mode',
+        choices=['resume', 'finetune'],
+        default='resume',
+    )
+    parser.add_argument('--cmab-transition-export-dir', type=str, default=None)
+    parser.add_argument('--cmab-environment-label', type=str, default='unlabeled')
+    parser.add_argument('--cmab-transition-run-id', type=str, default=None)
+
     args = parser.parse_args()
 
     print("🚀 Starting Autopilot RL Controller Server")
@@ -464,6 +600,28 @@ def main():
             accelerator_period=args.accelerator_period,
             cmab_policy=args.policy,
             cmab_start_pos=args.start_pos,
+            max_training_iterations=args.max_training_iterations,
+            enable_cmab_cut_fpt_cross_feature=args.enable_cmab_cut_fpt_cross_feature,
+            dqn_action_endpoints=args.dqn_action_endpoints,
+            dqn_action_timeout=args.dqn_action_timeout,
+            dqn_action_retries=args.dqn_action_retries,
+            dqn_learning_rate=args.dqn_learning_rate,
+            dqn_gamma=args.dqn_gamma,
+            dqn_replay_capacity=args.dqn_replay_capacity,
+            dqn_batch_size=args.dqn_batch_size,
+            dqn_learning_starts=args.dqn_learning_starts,
+            dqn_target_update_interval=args.dqn_target_update_interval,
+            dqn_epsilon_start=args.dqn_epsilon_start,
+            dqn_epsilon_end=args.dqn_epsilon_end,
+            dqn_epsilon_decay_steps=args.dqn_epsilon_decay_steps,
+            dqn_gradient_updates=args.dqn_gradient_updates,
+            dqn_gradient_clip=args.dqn_gradient_clip,
+            dqn_hidden_dim=args.dqn_hidden_dim,
+            dqn_seed=args.dqn_seed,
+            dqn_checkpoint_load_mode=args.dqn_checkpoint_load_mode,
+            cmab_transition_export_dir=args.cmab_transition_export_dir,
+            cmab_environment_label=args.cmab_environment_label,
+            cmab_transition_run_id=args.cmab_transition_run_id,
         )
         print("✅ Controller initialized successfully")
     except Exception as e:

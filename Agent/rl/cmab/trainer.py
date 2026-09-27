@@ -6,12 +6,16 @@ import os
 import re
 import socket
 import time
+import tempfile
 import hashlib
 from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+
+from actions.state_encode import build_dqn_state
+from offline_dataset import AsyncTransitionDatasetWriter
 
 from .accelerator import TrainingAccelerator
 from .arm_catalog import ArmCatalog
@@ -36,6 +40,8 @@ class CMABTrainer:
         accelerator: Optional[TrainingAccelerator] = None,
         enable_accelerator: bool = False,
         accelerator_period: int = 100,
+        transition_writer: Optional[AsyncTransitionDatasetWriter] = None,
+        latest_checkpoint_path: Optional[str] = None,
     ):
         self.metrics_dir = Path(metrics_dir)
         self.parameters_file = Path(parameters_file)
@@ -55,6 +61,8 @@ class CMABTrainer:
         self.node_index = node_index
         self.warmup_iterations = max(0, warmup_iterations)
         self.checkpoint_prefix = checkpoint_prefix or "cmab_checkpoint"
+        self.transition_writer = transition_writer
+        self.latest_checkpoint_path = Path(latest_checkpoint_path) if latest_checkpoint_path else None
         if accelerator is not None:
             self.accelerator = accelerator
         elif enable_accelerator:
@@ -182,6 +190,18 @@ class CMABTrainer:
                     use_arm = arm
 
                 apply_ok = self._param_apply_ok_from_global_state(next_metrics)
+                if self.transition_writer is not None:
+                    self._record_epoch_action_best_effort(
+                        current_epoch=current_epoch, reward_epoch=reward_epoch,
+                        selected_arm=arm, effective_arm=use_arm if apply_ok else None,
+                        abandoned=not apply_ok,
+                    )
+                    self._export_transition_best_effort(
+                        current_epoch=current_epoch, reward_epoch=reward_epoch,
+                        context=context, arm=use_arm, reward=reward,
+                        next_metrics_data=self._load_json_with_retry(next_metrics),
+                        abandoned=not apply_ok,
+                    )
                 skips_learning = getattr(self.policy, "skips_learning", lambda: False)()
                 in_warmup = iteration < self.warmup_iterations
                 if skips_learning:
@@ -245,14 +265,38 @@ class CMABTrainer:
                     )
                     self.policy.save(str(checkpoint_path))
                     logger.info("Saved checkpoint: %s", checkpoint_path)
+                    self._save_latest_checkpoint()
 
                 self.last_metrics_file = next_metrics
         finally:
+            self._close_transition_writer()
             if self.accelerator is not None:
                 self.accelerator.stop()
 
+    def _save_latest_checkpoint(self) -> None:
+        """Publish a complete per-run snapshot without damaging the last good one."""
+        path = self.latest_checkpoint_path
+        if path is None:
+            return
+        temporary_path = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+            self.policy.save(str(temporary_path))
+            os.replace(temporary_path, path)
+            logger.info("Saved latest run checkpoint: %s", path)
+        except Exception:
+            logger.exception("Failed to save latest run checkpoint: %s", path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
     def stop(self):
         self.training_active = False
+        self._close_transition_writer()
         if self.accelerator is not None:
             self.accelerator.stop()
         if self._param_socket is not None:
@@ -261,6 +305,96 @@ class CMABTrainer:
             except OSError:
                 pass
             self._param_socket = None
+
+    def _record_epoch_action_best_effort(
+        self,
+        *,
+        current_epoch: Optional[int],
+        reward_epoch: Optional[int],
+        selected_arm: str,
+        effective_arm: Optional[str],
+        abandoned: bool,
+    ) -> None:
+        writer = self.transition_writer
+        if writer is None or current_epoch is None or reward_epoch is None:
+            return
+        try:
+            writer.write_epoch_action(
+                source_epoch=current_epoch,
+                reward_epoch=reward_epoch,
+                selected_arm=selected_arm,
+                effective_arm=effective_arm,
+                abandoned=abandoned,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to record CMAB epoch action; CMAB will continue"
+            )
+            self._close_transition_writer()
+
+    def _export_transition_best_effort(
+        self,
+        *,
+        current_epoch: Optional[int],
+        reward_epoch: Optional[int],
+        context: np.ndarray,
+        arm: str,
+        reward: float,
+        next_metrics_data: dict,
+        abandoned: bool,
+    ) -> None:
+        writer = self.transition_writer
+        if writer is None:
+            return
+        contiguous = (
+            current_epoch is not None
+            and reward_epoch == current_epoch + 1
+        )
+        valid_reward = np.isfinite(reward) and 0 < reward <= 15
+        if not contiguous or abandoned or not valid_reward:
+            logger.warning(
+                "CMAB_OFFLINE_TRANSITION_DROPPED source_epoch=%s "
+                "reward_epoch=%s contiguous=%s abandoned=%s reward=%s",
+                current_epoch,
+                reward_epoch,
+                contiguous,
+                abandoned,
+                reward,
+            )
+            return
+        try:
+            next_state = self._build_context_from_data(next_metrics_data)
+            writer.write(
+                source_epoch=current_epoch,
+                reward_epoch=reward_epoch,
+                state=context,
+                arm=arm,
+                reward=reward,
+                next_state=next_state,
+                done=False,
+                truncated=False,
+            )
+        except Exception:
+            # This also protects CMAB if a future writer implementation stops
+            # being asynchronous or validates records on the caller thread.
+            logger.exception(
+                "CMAB_OFFLINE_TRANSITION_EXPORT_DISABLED run=%s; "
+                "CMAB will continue normally",
+                getattr(writer, "run_id", "unknown"),
+            )
+            self._close_transition_writer()
+
+    def _close_transition_writer(self) -> None:
+        writer = self.transition_writer
+        self.transition_writer = None
+        if writer is None:
+            return
+        try:
+            writer.close()
+        except Exception:
+            logger.exception(
+                "Failed to close CMAB transition writer; CMAB will continue"
+            )
 
     def _apply_accelerator(self) -> None:
         if self.accelerator is None:
@@ -418,40 +552,10 @@ class CMABTrainer:
         return data
 
     def _build_context_from_global_state(self, metrics_path: Path) -> np.ndarray:
-        data = self._load_json_with_retry(metrics_path)
-        growth_rates = (
-            data.get("state_4_lane_vector", {})
-            .get("growth_rates", {})
-        )
+        return self._build_context_from_data(self._load_json_with_retry(metrics_path))
 
-        lane_values = []
-        if isinstance(growth_rates, dict):
-            for _, v in sorted(growth_rates.items()):
-                try:
-                    lane_values.append(float(v))
-                except (TypeError, ValueError):
-                    continue
-
-        # Keep the same normalization used by previous state parser.
-        growth_min = 2.0
-        growth_max = 100.0
-        growth_scale = 20.0
-        growth_norm = []
-        for value in lane_values:
-            normalized = (value - growth_min) / (growth_max - growth_min) * growth_scale
-            growth_norm.append(max(0.0, min(growth_scale, normalized)))
-
-        fast_path_ratio = data.get("global_fast_path_ratio", 0.0)
-        try:
-            fast_path_ratio = float(fast_path_ratio)
-        except (TypeError, ValueError):
-            fast_path_ratio = 0.0
-
-        dynamic_state = np.asarray([*growth_norm, fast_path_ratio], dtype=np.float32)
-        if self.context_builder.mode == "dynamic":
-            return dynamic_state
-        # Full mode historically concatenates context + dynamic; context is empty in current setup.
-        return dynamic_state
+    def _build_context_from_data(self, data: dict) -> np.ndarray:
+        return build_dqn_state(data)
 
     def _extract_reward_from_global_state(self, metrics_path: Path) -> float:
         data = self._load_json_with_retry(metrics_path)

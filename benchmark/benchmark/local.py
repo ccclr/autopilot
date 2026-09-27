@@ -9,6 +9,7 @@ from time import sleep, time
 
 from fabric import Connection
 from benchmark.commands import CommandMaker
+from benchmark.rl_runtime import controller_options, start_dqn_receivers
 from benchmark.config import Key, LocalCommittee, NodeParameters, BenchParameters, ConfigError
 from benchmark.logs import LogParser, ParseError
 from benchmark.utils import Print, BenchError, PathMaker
@@ -241,10 +242,23 @@ class LocalBench:
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
             if resume_from:
                 Print.info(f'RL resume-from: {resume_from}')
+            dqn_endpoints = start_dqn_receivers(
+                self.bench_parameters, ['127.0.0.1'] * len(primary_addresses),
+                repo_name=os.path.abspath('..'), python_bin=agent_python,
+                parameters_file=lambda i: os.path.abspath(PathMaker.local_parameters_file(i)),
+                launch=lambda i, host, cmd: self._background_run(
+                    cmd, join(PathMaker.logs_path(), f'action_receiver-{i}.log')),
+                wait=lambda addresses: self._wait_for_tcp_listeners(
+                    addresses, timeout_sec=60, label='DQN receivers'), local=True,
+            )
             for i, address in enumerate(primary_addresses):
+                if rl_algo == "dqn" and i != 0:
+                    continue
                 cmd = CommandMaker.run_controller(
+                    **controller_options(self.bench_parameters, i, dqn_endpoints),
+                    metrics_dir=os.path.abspath(f"metrics-{i}"),
                     node_index=i,
-                    repo_name='autopilot',
+                    repo_name=os.path.abspath('..'),
                     log_dir=os.path.abspath(PathMaker.logs_path()),
                     parameters_file=os.path.abspath(PathMaker.local_parameters_file(i)),
                     python_bin=agent_python,
@@ -270,10 +284,11 @@ class LocalBench:
             window_size = self.node_parameters.json.get('window_size', 5)
             for i, address in enumerate(primary_addresses):
                 cmd = CommandMaker.run_metrics_collector(
+                    metrics_dir=os.path.abspath(f"metrics-{i}"),
                     epoch_slots=epoch_slots,
                     window_size=window_size,
                     node_index=i,
-                    repo_name='autopilot',  # Use relative path from benchmark directory
+                    repo_name=os.path.abspath('..'),
                     log_dir=os.path.abspath(PathMaker.logs_path()),
                     parameters_file=os.path.abspath(PathMaker.local_parameters_file(0)),
                     python_bin=agent_python,

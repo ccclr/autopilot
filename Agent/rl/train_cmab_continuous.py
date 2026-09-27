@@ -7,6 +7,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from offline_dataset import AsyncTransitionDatasetWriter
 from actions.action_encode import ActionCodec
 from cmab import (
     ArmCatalog,
@@ -78,7 +79,13 @@ def main():
         default=100,
         help="Epochs between master latency probes (apply 5 epochs later).",
     )
+    parser.add_argument("--enable-cut-fpt-cross-feature", action="store_true")
+    parser.add_argument("--transition-export-dir", default=None)
+    parser.add_argument("--environment-label", default="unlabeled")
+    parser.add_argument("--run-id", default=None)
     args = parser.parse_args()
+    if args.enable_cut_fpt_cross_feature and args.policy in ("factorized", "combined"):
+        parser.error("Cut-FPT cross features apply to the standard CMAB policy; choose rf_ts")
 
     warmup_iterations = max(0, int(args.warmup_iterations))
     logger.info("Starting Autopilot Continuous CMAB Training")
@@ -123,6 +130,7 @@ def main():
             arms,
             feature_dim=feature_dim,
             policy_name=args.policy,
+            enable_cut_fpt_cross_feature=args.enable_cut_fpt_cross_feature,
             epsilon=args.epsilon,
             random_state=args.seed,
             action_encoding=args.action_encoding,
@@ -136,6 +144,40 @@ def main():
         logger.info("Loaded CMAB policy from %s", args.resume_from)
 
     context_builder = ContextBuilder(mode=args.context_mode)
+    transition_writer = None
+    if args.transition_export_dir and args.node_index == 0:
+        try:
+            transition_writer = AsyncTransitionDatasetWriter(
+                root_dir=args.transition_export_dir,
+                environment=args.environment_label,
+                run_id=args.run_id or "",
+                arms=arms,
+                node_index=args.node_index,
+                enable_epoch_actions=True,
+                metadata={
+                    "policy": args.policy,
+                    "seed": args.seed,
+                    "warmup_iterations": warmup_iterations,
+                    "cut_fpt_cross_feature": args.enable_cut_fpt_cross_feature,
+                    "cut_fpt_cross_schema": (
+                        CMABPolicy.CUT_FPT_CROSS_SCHEMA
+                        if args.enable_cut_fpt_cross_feature
+                        else None
+                    ),
+                },
+            )
+            logger.info(
+                "CMAB offline transitions: run=%s path=%s",
+                transition_writer.run_id,
+                transition_writer.transition_path,
+            )
+        except Exception:
+            # Dataset collection is observational. A missing/unwritable export
+            # directory must never prevent the original CMAB trainer from running.
+            logger.exception(
+                "CMAB_OFFLINE_TRANSITION_EXPORT_DISABLED during setup; "
+                "CMAB will continue normally"
+            )
     trainer = CMABTrainer(
         metrics_dir=args.metrics_dir,
         parameters_file=args.parameters_file,
@@ -148,9 +190,15 @@ def main():
         warmup_iterations=warmup_iterations,
         enable_accelerator=args.enable_accelerator,
         accelerator_period=args.accelerator_period,
+        transition_writer=transition_writer,
+        latest_checkpoint_path=(str(transition_writer.run_dir / "cmab_checkpoint_latest.pkl")
+                                if transition_writer is not None else None),
     )
 
-    trainer.run(num_iterations=args.num_iterations, checkpoint_freq=args.checkpoint_freq)
+    try:
+        trainer.run(num_iterations=args.num_iterations, checkpoint_freq=args.checkpoint_freq)
+    finally:
+        trainer.stop()
 
 
 if __name__ == "__main__":

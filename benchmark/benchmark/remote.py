@@ -18,6 +18,7 @@ import subprocess
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar
 from benchmark.commands import CommandMaker
+from benchmark.rl_runtime import controller_options, start_dqn_receivers
 from benchmark.logs import LogParser, ParseError
 from benchmark.gcp_instance import InstanceManager
 
@@ -576,9 +577,22 @@ class Bench:
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
             if resume_from:
                 Print.info(f'RL resume-from: {resume_from}')
+            dqn_endpoints = start_dqn_receivers(
+                bench_parameters, [Committee.ip(a) for a in primary_addresses],
+                repo_name=self.settings.repo_name,
+                python_bin=CommandMaker.agent_venv_python(),
+                parameters_file=lambda i: f'{self.home}/.parameters.json',
+                launch=lambda i, host, cmd: self._background_run(
+                    host, cmd, join(PathMaker.logs_path(), f'action_receiver-{i}.log')),
+                wait=lambda addresses: self._wait_for_tcp_listeners(
+                    addresses, timeout_sec=90, label='DQN receivers'),
+            )
             for i, address in enumerate(primary_addresses):
+                if rl_algo == "dqn" and i != 0:
+                    continue
                 host = Committee.ip(address)
                 cmd = CommandMaker.run_controller(
+                    **controller_options(bench_parameters, i, dqn_endpoints),
                     node_index=i,
                     repo_name=self.settings.repo_name,
                     log_dir=PathMaker.logs_path(),

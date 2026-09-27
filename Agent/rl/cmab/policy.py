@@ -15,6 +15,14 @@ ROUND_ROBIN_START_POS = 0
 
 
 class CMABPolicy:
+    CUT_FPT_KEYS = ("cut_condition_type", "fast_path_timeout")
+    CUT_FPT_PAIRS = tuple(
+        (cut, timeout)
+        for cut in (2.0, 3.0, 4.0)
+        for timeout in (0.0, 100.0, 200.0, 300.0)
+    )
+    CUT_FPT_CROSS_SCHEMA = "cut_condition_type_x_fast_path_timeout_one_hot_v1"
+
     ACTION_ENCODINGS = ("numeric", "one_hot")
 
     def __init__(
@@ -32,6 +40,7 @@ class CMABPolicy:
         min_epsilon: float = 0,
         replay_window: int = 200,
         action_encoding: str = "numeric",
+        enable_cut_fpt_cross_feature: bool = False,
     ):
         self._arms = list(arms)
         if len(set(self._arms)) != len(self._arms):
@@ -56,6 +65,16 @@ class CMABPolicy:
         self._min_epsilon = float(min_epsilon)
         self._replay_window = max(1, int(replay_window))
         
+        self.enable_cut_fpt_cross_feature = bool(enable_cut_fpt_cross_feature)
+        self._cut_fpt_pair_to_index = {
+            pair: index for index, pair in enumerate(self.CUT_FPT_PAIRS)
+        }
+        if self.enable_cut_fpt_cross_feature:
+            # Validate the complete catalog before training starts so every
+            # replica uses the same supported pair set and column ordering.
+            for arm in self._arms:
+                self._cut_fpt_cross_vector(arm)
+
         self._rf = RandomForestRegressor(
             n_estimators=n_estimators,
             max_depth=10,
@@ -206,14 +225,51 @@ class CMABPolicy:
             return np.asarray(values, dtype=np.float32)
         return np.asarray(arm, dtype=np.float32).flatten()
 
+    def _arm_feature_vector(self, arm) -> np.ndarray:
+        arm_vec = self._arm_to_vector(arm)
+        if self.enable_cut_fpt_cross_feature:
+            arm_vec = np.concatenate([arm_vec, self._cut_fpt_cross_vector(arm)])
+        return arm_vec
+
     def _feature_row(self, context, arm):
         """将 context 和 arm 组合成特征向量"""
         # 假设 context 是一个 list/ndarray，arm 是一个数值或向量
-        arm_vec = self._arm_to_vector(arm)
+        arm_vec = self._arm_feature_vector(arm)
         if self._uses_context:
             ctx_vec = np.array(context).flatten()
             return np.concatenate([ctx_vec, arm_vec])
         return arm_vec
+
+    @staticmethod
+    def _arm_values(arm) -> dict[str, float]:
+        if not isinstance(arm, str) or "=" not in arm:
+            raise ValueError(
+                "Cut-FPT cross feature requires named CMAB arms, got "
+                f"{arm!r}"
+            )
+        values = {}
+        for part in arm.split(","):
+            key, value = part.split("=", 1)
+            values[key] = float(value)
+        return values
+
+    def _cut_fpt_cross_vector(self, arm) -> np.ndarray:
+        values = self._arm_values(arm)
+        try:
+            pair = tuple(values[key] for key in self.CUT_FPT_KEYS)
+        except KeyError as error:
+            raise ValueError(
+                f"CMAB arm is missing crossed parameter {error.args[0]!r}: {arm!r}"
+            ) from error
+        try:
+            index = self._cut_fpt_pair_to_index[pair]
+        except KeyError as error:
+            raise ValueError(
+                f"Unsupported cut_condition_type/fast_path_timeout pair {pair!r}"
+            ) from error
+        cross = np.zeros(len(self.CUT_FPT_PAIRS), dtype=np.float32)
+        cross[index] = 1.0
+        return cross
 
     def _feature_matrix(self, context):
         """为所有 arm 构建特征矩阵，用于一次性预测"""
@@ -225,7 +281,7 @@ class CMABPolicy:
         if not self._X:
             return window_counts, 0
 
-        arm_vectors = {arm: self._arm_to_vector(arm) for arm in self._arms}
+        arm_vectors = {arm: self._arm_feature_vector(arm) for arm in self._arms}
         recent_features = self._X[-self._replay_window:]
         matched_rows = 0
 
@@ -455,6 +511,9 @@ class CMABPolicy:
             'y': self._y,
             'is_fitted': self._is_fitted,
             'update_count': self._update_count,
+            'enable_cut_fpt_cross_feature': self.enable_cut_fpt_cross_feature,
+            'cut_fpt_cross_schema': self.CUT_FPT_CROSS_SCHEMA,
+            'cut_fpt_pairs': self.CUT_FPT_PAIRS,
             'action_encoding': self.action_encoding,
             'arms': list(self._arms),
             'round_robin_step': self._round_robin_step,
@@ -484,6 +543,24 @@ class CMABPolicy:
             and tuple(checkpoint_arms) != tuple(self._arms)
         ):
             raise ValueError("CMAB checkpoint arm catalog does not match current arms")
+        checkpoint_cross_enabled = bool(
+            data.get('enable_cut_fpt_cross_feature', False)
+        )
+        if checkpoint_cross_enabled != self.enable_cut_fpt_cross_feature:
+            raise ValueError(
+                "CMAB checkpoint Cut-FPT cross-feature setting does not match "
+                f"the current configuration (checkpoint={checkpoint_cross_enabled}, "
+                f"configured={self.enable_cut_fpt_cross_feature})"
+            )
+        if checkpoint_cross_enabled:
+            if data.get('cut_fpt_cross_schema') != self.CUT_FPT_CROSS_SCHEMA:
+                raise ValueError("CMAB checkpoint Cut-FPT cross-feature schema mismatch")
+            checkpoint_pairs = tuple(
+                tuple(pair) for pair in data.get('cut_fpt_pairs', ())
+            )
+            if checkpoint_pairs != self.CUT_FPT_PAIRS:
+                raise ValueError("CMAB checkpoint Cut-FPT pair catalog mismatch")
+
         self._rf = data['rf']
         self._X = data['X']
         self._y = data['y']

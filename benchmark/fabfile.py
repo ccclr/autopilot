@@ -41,8 +41,30 @@ def local(ctx, debug=False, enable_accelerator=False, accelerator_period=100):
 
         # CMAB: set a checkpoint path to resume RL, or None to train from scratch.
         'cmab_resume_from': None,
-        # RL algorithm: "cmab", "xgboost", "gp_bo", or "kernel_ucb"
+        # RL algorithm: "cmab", "xgboost", "gp_bo", "kernel_ucb", or "dqn"
         'rl_algo': 'cmab',
+        # Optional standard CMAB RF Cut x FPT features (12 extra columns).
+        'enable_cmab_cut_fpt_cross_feature': False,
+        # Online DQN; set rl_algo='dqn'. Only node0 trains, all primaries receive actions.
+        'dqn_action_port': 19100,
+        'dqn_learning_rate': 1e-3,
+        'dqn_gamma': 0.90,
+        'dqn_batch_size': 32,
+        'dqn_learning_starts': 32,
+        'dqn_replay_capacity': 2000,
+        'dqn_target_update_interval': 20,
+        'dqn_epsilon_start': 1.0,
+        'dqn_epsilon_end': 0.05,
+        'dqn_epsilon_decay_steps': 200,
+        'dqn_seed': 0,
+        # Set cmab_resume_from to a .pt checkpoint; use finetune for offline -> online.
+        'dqn_checkpoint_load_mode': 'resume',
+        'rl_max_training_iterations': 2500,
+        # Optional node0 CMAB transition export for offline DQN training.
+        'enable_cmab_transition_export': False,
+        'cmab_transition_export_dir': '/tmp/autopilot_offline_data',
+        'cmab_environment_label': 'gcp',
+
         # CMAB-RF only: "numeric" preserves the legacy raw parameter vector;
         # "one_hot" assigns one indicator feature to each complete arm.
         'cmab_action_encoding': 'numeric',
@@ -218,8 +240,30 @@ def remote(
 
         # CMAB: set a checkpoint path to resume RL, or None to train from scratch.
         'cmab_resume_from': resume_from,
-        # RL algorithm: "cmab", "xgboost", "gp_bo", or "kernel_ucb"
+        # RL algorithm: "cmab", "xgboost", "gp_bo", "kernel_ucb", or "dqn"
         'rl_algo': 'cmab',
+        # Optional standard CMAB RF Cut x FPT features (12 extra columns).
+        'enable_cmab_cut_fpt_cross_feature': False,
+        # Online DQN; set rl_algo='dqn'. Only node0 trains, all primaries receive actions.
+        'dqn_action_port': 19100,
+        'dqn_learning_rate': 1e-3,
+        'dqn_gamma': 0.90,
+        'dqn_batch_size': 32,
+        'dqn_learning_starts': 32,
+        'dqn_replay_capacity': 2000,
+        'dqn_target_update_interval': 20,
+        'dqn_epsilon_start': 1.0,
+        'dqn_epsilon_end': 0.05,
+        'dqn_epsilon_decay_steps': 200,
+        'dqn_seed': 0,
+        # Set cmab_resume_from to a .pt checkpoint; use finetune for offline -> online.
+        'dqn_checkpoint_load_mode': 'resume',
+        'rl_max_training_iterations': 2500,
+        # Optional node0 CMAB transition export for offline DQN training.
+        'enable_cmab_transition_export': False,
+        'cmab_transition_export_dir': '/tmp/autopilot_offline_data',
+        'cmab_environment_label': 'gcp',
+
         # CMAB-RF action representation. Use "numeric" for the existing
         # baseline and "one_hot" for the encoding comparison experiment.
         'cmab_action_encoding': "numeric",

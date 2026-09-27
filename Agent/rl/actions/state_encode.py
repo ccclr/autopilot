@@ -2,7 +2,39 @@ import json
 import time
 import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
+
+
+DQN_STATE_SCHEMA = "lane_growth_norm_0_20_plus_global_fpr_v1"
+
+
+def build_dqn_state(data: Mapping) -> np.ndarray:
+    """Build the shared raw DQN/CMAB state from one global-state record.
+
+    Lane growth values are sorted by lane id and mapped into ``[0, 20]``.
+    ``DQNPolicy`` performs the final ``[0, 1]`` scaling when a transition is
+    inserted, so persisted offline datasets must keep this raw representation.
+    """
+
+    growth_rates = data.get("state_4_lane_vector", {}).get("growth_rates", {})
+    lane_values = []
+    if isinstance(growth_rates, dict):
+        for _, value in sorted(growth_rates.items()):
+            try:
+                lane_values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+
+    growth_norm = [
+        max(0.0, min(20.0, (value - 2.0) / (100.0 - 2.0) * 20.0))
+        for value in lane_values
+    ]
+    try:
+        fast_path_ratio = float(data.get("global_fast_path_ratio", 0.0))
+    except (TypeError, ValueError):
+        fast_path_ratio = 0.0
+
+    return np.asarray([*growth_norm, fast_path_ratio], dtype=np.float32)
 
 def parse_metrics_with_context(json_path):
     """

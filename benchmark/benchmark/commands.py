@@ -219,13 +219,13 @@ class CommandMaker:
         return f'rm -f node benchmark_client ; ln -s {node} . ; ln -s {client} .'
 
     @staticmethod
-    def run_metrics_collector(epoch_slots, window_size, node_index=None, repo_name=None, log_dir=None, parameters_file=None, python_bin=None):
+    def run_metrics_collector(epoch_slots, window_size, node_index=None, repo_name=None, log_dir=None, parameters_file=None, python_bin=None, metrics_dir=None):
         """Generate command to run metrics_collector as a background process"""
         assert isinstance(epoch_slots, int) and epoch_slots > 0
         assert isinstance(window_size, int) and window_size > 0
         # Use relative path from benchmark directory (../Agent/metrics_collector.py)
         # or absolute path if repo_name is provided
-        metrics_collector_path = f'{CommandMaker.HOME}/{repo_name}/Agent/metrics_collector.py'
+        metrics_collector_path = join(CommandMaker.HOME, repo_name, 'Agent/metrics_collector.py')
         socket_path = f'/tmp/autopilot_core_{node_index}.sock'
         python = CommandMaker.agent_python(python_bin)
         cmd = f'RUST_STATE_SOCKET_PATH={socket_path} {python} {metrics_collector_path}'
@@ -233,7 +233,28 @@ class CommandMaker:
         cmd += f' --node-index {node_index}'
         cmd += f' --log-dir {log_dir}'
         cmd += f' --parameters-file {parameters_file}'
-        cmd += f' --metrics-dir {CommandMaker.HOME}/metrics-{node_index}'
+        cmd += ' --metrics-dir ' + shlex.quote(str(metrics_dir or f'{CommandMaker.HOME}/metrics-{node_index}'))
+        return cmd
+
+    @staticmethod
+    def run_action_receiver(
+        node_index=None,
+        repo_name=None,
+        parameters_file=None,
+        python_bin=None,
+        bind_host='0.0.0.0',
+        port=19100,
+    ):
+        """Generate the per-node receiver used by centralized DQN."""
+        receiver_path = (
+            join(CommandMaker.HOME, repo_name, 'Agent/rl/controllers/action_receiver.py')
+        )
+        python = CommandMaker.agent_python(python_bin)
+        cmd = f'{python} {receiver_path}'
+        cmd += f' --node-index {int(node_index)}'
+        cmd += f' --parameters-file {shlex.quote(str(parameters_file))}'
+        cmd += f' --bind-host {shlex.quote(str(bind_host))}'
+        cmd += f' --port {int(port)}'
         return cmd
 
     @staticmethod
@@ -252,13 +273,36 @@ class CommandMaker:
         accelerator_period=None,
         cmab_policy=None,
         cmab_start_pos=None,
+        max_training_iterations=None,
+        dqn_action_endpoints=None,
+        dqn_action_timeout=None,
+        dqn_action_retries=None,
+        dqn_learning_rate=None,
+        dqn_gamma=None,
+        dqn_replay_capacity=None,
+        dqn_batch_size=None,
+        dqn_learning_starts=None,
+        dqn_target_update_interval=None,
+        dqn_epsilon_start=None,
+        dqn_epsilon_end=None,
+        dqn_epsilon_decay_steps=None,
+        dqn_gradient_updates=None,
+        dqn_gradient_clip=None,
+        dqn_hidden_dim=None,
+        dqn_seed=None,
+        dqn_checkpoint_load_mode=None,
+        enable_cmab_cut_fpt_cross_feature=False,
+        cmab_transition_export_dir=None,
+        cmab_environment_label=None,
+        cmab_transition_run_id=None,
+        metrics_dir=None,
     ):
         """Generate command to run controller as a background process"""
-        controller_path = f'{CommandMaker.HOME}/{repo_name}/Agent/rl/controllers/controller.py'
+        controller_path = join(CommandMaker.HOME, repo_name, 'Agent/rl/controllers/controller.py')
         # update_parameters_path = f'{CommandMaker.HOME}/{repo_name}/Agent/update_parameters_{node_index}.json'
         python = CommandMaker.agent_python(python_bin)
         cmd = f'{python} {controller_path}'
-        cmd += f' --metrics-dir {CommandMaker.HOME}/metrics-{node_index}'
+        cmd += ' --metrics-dir ' + shlex.quote(str(metrics_dir or f'{CommandMaker.HOME}/metrics-{node_index}'))
         cmd += f' --node-index {node_index}'
         cmd += f' --log-dir {log_dir}'
         cmd += f' --parameters-file {parameters_file}'
@@ -283,4 +327,66 @@ class CommandMaker:
             cmd += f' --start-pos {int(cmab_start_pos)}'
         if accelerator_period is not None:
             cmd += f' --accelerator-period {int(accelerator_period)}'
+        if enable_cmab_cut_fpt_cross_feature:
+            cmd += ' --enable-cmab-cut-fpt-cross-feature'
+        if cmab_transition_export_dir:
+            cmd += (
+                ' --cmab-transition-export-dir '
+                f'{shlex.quote(str(cmab_transition_export_dir))}'
+            )
+        if cmab_environment_label:
+            cmd += (
+                ' --cmab-environment-label '
+                f'{shlex.quote(str(cmab_environment_label))}'
+            )
+        if cmab_transition_run_id:
+            cmd += (
+                ' --cmab-transition-run-id '
+                f'{shlex.quote(str(cmab_transition_run_id))}'
+            )
+        if max_training_iterations is not None:
+            cmd += f' --max-training-iterations {int(max_training_iterations)}'
+        if dqn_action_endpoints:
+            cmd += (
+                ' --dqn-action-endpoints '
+                f'{shlex.quote(str(dqn_action_endpoints))}'
+            )
+        if dqn_action_timeout is not None:
+            cmd += f' --dqn-action-timeout {float(dqn_action_timeout)}'
+        if dqn_action_retries is not None:
+            cmd += f' --dqn-action-retries {int(dqn_action_retries)}'
+        if dqn_learning_rate is not None:
+            cmd += f' --dqn-learning-rate {float(dqn_learning_rate)}'
+        if dqn_gamma is not None:
+            cmd += f' --dqn-gamma {float(dqn_gamma)}'
+        if dqn_replay_capacity is not None:
+            cmd += f' --dqn-replay-capacity {int(dqn_replay_capacity)}'
+        if dqn_batch_size is not None:
+            cmd += f' --dqn-batch-size {int(dqn_batch_size)}'
+        if dqn_learning_starts is not None:
+            cmd += f' --dqn-learning-starts {int(dqn_learning_starts)}'
+        if dqn_target_update_interval is not None:
+            cmd += (
+                ' --dqn-target-update-interval '
+                f'{int(dqn_target_update_interval)}'
+            )
+        if dqn_epsilon_start is not None:
+            cmd += f' --dqn-epsilon-start {float(dqn_epsilon_start)}'
+        if dqn_epsilon_end is not None:
+            cmd += f' --dqn-epsilon-end {float(dqn_epsilon_end)}'
+        if dqn_epsilon_decay_steps is not None:
+            cmd += f' --dqn-epsilon-decay-steps {int(dqn_epsilon_decay_steps)}'
+        if dqn_gradient_updates is not None:
+            cmd += f' --dqn-gradient-updates {int(dqn_gradient_updates)}'
+        if dqn_gradient_clip is not None:
+            cmd += f' --dqn-gradient-clip {float(dqn_gradient_clip)}'
+        if dqn_hidden_dim is not None:
+            cmd += f' --dqn-hidden-dim {int(dqn_hidden_dim)}'
+        if dqn_seed is not None:
+            cmd += f' --dqn-seed {int(dqn_seed)}'
+        if dqn_checkpoint_load_mode:
+            cmd += (
+                ' --dqn-checkpoint-load-mode '
+                f'{shlex.quote(str(dqn_checkpoint_load_mode))}'
+            )
         return cmd

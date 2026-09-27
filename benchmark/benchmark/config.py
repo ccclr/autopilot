@@ -1,4 +1,5 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
+import math
 from json import dump, load
 from collections import OrderedDict
 
@@ -269,11 +270,12 @@ class BenchParameters:
             if not isinstance(rl_algo, str) or rl_algo.lower() not in (
                 'cmab',
                 'xgboost',
+                'dqn',
                 'gp_bo',
                 'kernel_ucb',
             ):
                 raise ConfigError(
-                    'rl_algo must be "cmab", "xgboost", "gp_bo", or "kernel_ucb"'
+                    'rl_algo must be dqn or "cmab", "xgboost", "gp_bo", or "kernel_ucb"'
                 )
             self.rl_algo = rl_algo.lower()
             cmab_action_encoding = json.get(
@@ -297,6 +299,174 @@ class BenchParameters:
             if cmab_seed < 0:
                 raise ConfigError('cmab_seed must be an integer >= 0')
             self.cmab_seed = cmab_seed
+            enable_cmab_cut_fpt_cross_feature = json.get(
+                'enable_cmab_cut_fpt_cross_feature', False
+            )
+            if not isinstance(enable_cmab_cut_fpt_cross_feature, bool):
+                raise ConfigError(
+                    'enable_cmab_cut_fpt_cross_feature must be true or false'
+                )
+            self.enable_cmab_cut_fpt_cross_feature = (
+                enable_cmab_cut_fpt_cross_feature
+            )
+            enable_cmab_transition_export = json.get(
+                'enable_cmab_transition_export', False
+            )
+            if not isinstance(enable_cmab_transition_export, bool):
+                raise ConfigError(
+                    'enable_cmab_transition_export must be true or false'
+                )
+            self.enable_cmab_transition_export = enable_cmab_transition_export
+
+            transition_export_dir = json.get(
+                'cmab_transition_export_dir', '/local/autopilot_offline_data'
+            )
+            if (
+                not isinstance(transition_export_dir, str)
+                or not transition_export_dir.strip()
+            ):
+                raise ConfigError(
+                    'cmab_transition_export_dir must be a non-empty path'
+                )
+            self.cmab_transition_export_dir = transition_export_dir
+
+            environment_label = json.get('cmab_environment_label', 'unlabeled')
+            if (
+                not isinstance(environment_label, str)
+                or not environment_label.strip()
+            ):
+                raise ConfigError(
+                    'cmab_environment_label must be a non-empty string'
+                )
+            self.cmab_environment_label = environment_label.strip()
+            # Maximum number of iterations processed by this RL trainer run.
+            # None means that training continues until the experiment shuts it down.
+            max_training_iterations = json.get('rl_max_training_iterations', 2500)
+            if max_training_iterations in (None, ''):
+                self.rl_max_training_iterations = None
+            else:
+                if isinstance(max_training_iterations, bool):
+                    raise ConfigError(
+                        'rl_max_training_iterations must be a positive integer or null'
+                    )
+                try:
+                    max_training_iterations = int(max_training_iterations)
+                except (TypeError, ValueError) as e:
+                    raise ConfigError(
+                        'rl_max_training_iterations must be a positive integer or null'
+                    ) from e
+                if max_training_iterations <= 0:
+                    raise ConfigError(
+                        'rl_max_training_iterations must be a positive integer or null'
+                    )
+                self.rl_max_training_iterations = max_training_iterations
+
+            def positive_int(name, default):
+                value = json.get(name, default)
+                if isinstance(value, bool):
+                    raise ConfigError(f'{name} must be a positive integer')
+                try:
+                    value = int(value)
+                except (TypeError, ValueError) as e:
+                    raise ConfigError(f'{name} must be a positive integer') from e
+                if value <= 0:
+                    raise ConfigError(f'{name} must be a positive integer')
+                return value
+
+            def positive_float(name, default, allow_zero=False):
+                value = json.get(name, default)
+                if isinstance(value, bool):
+                    raise ConfigError(f'{name} must be a finite number')
+                try:
+                    value = float(value)
+                except (TypeError, ValueError) as e:
+                    raise ConfigError(f'{name} must be a finite number') from e
+                lower_bound_valid = value >= 0 if allow_zero else value > 0
+                if not lower_bound_valid or not math.isfinite(value):
+                    qualifier = 'non-negative' if allow_zero else 'positive'
+                    raise ConfigError(f'{name} must be a finite {qualifier} number')
+                return value
+
+            def non_negative_int(name, default):
+                value = json.get(name, default)
+                if isinstance(value, bool):
+                    raise ConfigError(f'{name} must be a non-negative integer')
+                try:
+                    value = int(value)
+                except (TypeError, ValueError) as e:
+                    raise ConfigError(
+                        f'{name} must be a non-negative integer'
+                    ) from e
+                if value < 0:
+                    raise ConfigError(f'{name} must be a non-negative integer')
+                return value
+
+            # Centralized node0 DQN controls.  Only node0 owns the neural
+            # network/replay buffer; every primary runs a TCP action receiver.
+            self.dqn_training_node = non_negative_int('dqn_training_node', 0)
+            if self.dqn_training_node != 0:
+                raise ConfigError('centralized DQN currently requires dqn_training_node=0')
+            self.dqn_action_port = positive_int('dqn_action_port', 19100)
+            if self.dqn_action_port > 65535:
+                raise ConfigError('dqn_action_port must be <= 65535')
+            self.dqn_action_timeout = positive_float('dqn_action_timeout', 2.0)
+            self.dqn_action_retries = non_negative_int('dqn_action_retries', 2)
+            self.dqn_learning_rate = positive_float('dqn_learning_rate', 1e-3)
+            self.dqn_gamma = positive_float(
+                'dqn_gamma', 0.90, allow_zero=True
+            )
+            if self.dqn_gamma > 1:
+                raise ConfigError('dqn_gamma must be between 0 and 1')
+            self.dqn_replay_capacity = positive_int(
+                'dqn_replay_capacity', 2000
+            )
+            self.dqn_batch_size = positive_int('dqn_batch_size', 32)
+            self.dqn_learning_starts = positive_int('dqn_learning_starts', 32)
+            if self.dqn_replay_capacity < self.dqn_batch_size:
+                raise ConfigError(
+                    'dqn_replay_capacity must be at least dqn_batch_size'
+                )
+            if self.dqn_learning_starts < self.dqn_batch_size:
+                raise ConfigError(
+                    'dqn_learning_starts must be at least dqn_batch_size'
+                )
+            self.dqn_target_update_interval = positive_int(
+                'dqn_target_update_interval', 20
+            )
+            self.dqn_epsilon_start = positive_float(
+                'dqn_epsilon_start', 1.0, allow_zero=True
+            )
+            self.dqn_epsilon_end = positive_float(
+                'dqn_epsilon_end', 0.05, allow_zero=True
+            )
+            if not (
+                0 <= self.dqn_epsilon_end <= self.dqn_epsilon_start <= 1
+            ):
+                raise ConfigError(
+                    'DQN epsilon values must satisfy 0 <= end <= start <= 1'
+                )
+            self.dqn_epsilon_decay_steps = positive_int(
+                'dqn_epsilon_decay_steps', 200
+            )
+            self.dqn_gradient_updates = positive_int(
+                'dqn_gradient_updates', 1
+            )
+            self.dqn_gradient_clip = positive_float(
+                'dqn_gradient_clip', 10.0
+            )
+            self.dqn_hidden_dim = positive_int('dqn_hidden_dim', 64)
+            self.cmab_seed = non_negative_int('cmab_seed', 0)
+            self.dqn_seed = non_negative_int('dqn_seed', 0)
+            checkpoint_load_mode = json.get(
+                'dqn_checkpoint_load_mode', 'resume'
+            )
+            if checkpoint_load_mode not in ('resume', 'finetune'):
+                raise ConfigError(
+                    'dqn_checkpoint_load_mode must be "resume" or "finetune"'
+                )
+            self.dqn_checkpoint_load_mode = checkpoint_load_mode
+
+
 
             # Unified warmup passed to controller/trainer:
             # cmab -> skip N policy updates; gp_bo/kernel_ucb -> N cold-start samples before fit.
@@ -332,6 +502,10 @@ class BenchParameters:
                     'round_robin, factorized, combined'
                 )
             self.cmab_policy = cmab_policy
+            if self.enable_cmab_cut_fpt_cross_feature and (
+                self.rl_algo != 'cmab' or cmab_policy in ('factorized', 'combined')
+            ):
+                raise ConfigError('enable_cmab_cut_fpt_cross_feature requires standard CMAB')
 
             try:
                 cmab_start_pos = int(json.get('cmab_start_pos', 0) or 0)
