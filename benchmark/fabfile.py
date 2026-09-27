@@ -203,7 +203,7 @@ def remote(
     cmab_action_encoding='numeric',
     duration=3600,
     rl_algo='cmab',
-    cmab_policy='combined',
+    cmab_policy='round_robin',
     cmab_start_pos=0,
     start_controller=True,
 ):
@@ -291,7 +291,7 @@ def remote(
         'cmab_action_encoding': encoding,
         # Pair numeric/one_hot with the same seed; change only between reps.
         'cmab_seed': int(cmab_seed),
-        'rl_warmup_iterations': 3,
+        'rl_warmup_iterations': 5,
         'cmab_policy': policy,
         'cmab_start_pos': start_pos,
         'enable_accelerator': False,
@@ -332,7 +332,7 @@ def remote(
         'car_timeout': 2000,
         'cut_condition_type': 3,
 
-        'simulate_asynchrony': True,
+        'simulate_asynchrony': False,
         'asynchrony_type': [6],
 
         'asynchrony_start': [0],  # s
@@ -340,7 +340,7 @@ def remote(
         'affected_nodes': [4],
         'asynchrony_nodes': [4],
         'asynchrony_regions': [[zone]],
-        'egress_penalty': [[[0, 10, 30, 70]]],
+        'egress_penalty': [[[0, 10]]],
 
         'use_fast_sync': True,
         'use_exponential_timeouts': False,
