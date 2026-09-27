@@ -14,9 +14,6 @@ DQN_OPTIONS = (
 def controller_options(parameters, node_index, endpoints=None):
     options = {
         'enable_cmab_cut_fpt_cross_feature': parameters.enable_cmab_cut_fpt_cross_feature,
-        'cmab_fixed_k': parameters.cmab_fixed_k,
-        'cmab_factor_freeze_samples': parameters.cmab_factor_freeze_samples,
-        'cmab_factor_freeze_margin_ms': parameters.cmab_factor_freeze_margin_ms,
         'max_training_iterations': parameters.rl_max_training_iterations,
     }
     if parameters.rl_algo == 'dqn':

@@ -203,11 +203,8 @@ def remote(
     cmab_action_encoding='numeric',
     duration=3600,
     rl_algo='cmab',
-    cmab_policy='rf_ts',
+    cmab_policy='round_robin',
     cmab_start_pos=0,
-    cmab_fixed_k=1,
-    cmab_factor_freeze_samples=20,
-    cmab_factor_freeze_margin_ms=30,
     start_controller=True,
 ):
     ''' Run benchmarks on GCP.
@@ -216,11 +213,6 @@ def remote(
     cmab_policy applies when rl_algo is cmab:
       rf_ts, random, default, round_robin, factorized, combined.
     Omit the controller with --no-start-controller.
-    cmab_fixed_k: 1 or 4 locks parallel proposals to that value (48 arms).
-    Pass 0 to search both k=1 and k=4 (96 arms).
-    cmab_factor_freeze_samples: each factor level must collect this many
-    clean samples before equivalent levels collapse. 0 disables.
-    cmab_factor_freeze_margin_ms: median latency gap treated as equivalent.
     '''
     encoding = str(cmab_action_encoding).lower()
     if encoding not in ('numeric', 'one_hot'):
@@ -247,27 +239,6 @@ def remote(
         raise ValueError('cmab_start_pos must be an integer >= 0') from exc
     if start_pos < 0:
         raise ValueError('cmab_start_pos must be an integer >= 0')
-    if cmab_fixed_k in (None, '', 0, '0', 'none', 'None'):
-        fixed_k = None
-    else:
-        try:
-            fixed_k = int(cmab_fixed_k)
-        except (TypeError, ValueError) as exc:
-            raise ValueError('cmab_fixed_k must be 1, 4, or 0') from exc
-        if fixed_k not in (1, 4):
-            raise ValueError('cmab_fixed_k must be 1, 4, or 0')
-    try:
-        freeze_samples = int(cmab_factor_freeze_samples)
-    except (TypeError, ValueError) as exc:
-        raise ValueError('cmab_factor_freeze_samples must be an integer >= 0') from exc
-    if freeze_samples < 0:
-        raise ValueError('cmab_factor_freeze_samples must be an integer >= 0')
-    try:
-        freeze_margin = float(cmab_factor_freeze_margin_ms)
-    except (TypeError, ValueError) as exc:
-        raise ValueError('cmab_factor_freeze_margin_ms must be a positive number') from exc
-    if freeze_margin <= 0:
-        raise ValueError('cmab_factor_freeze_margin_ms must be a positive number')
     resume_from = None
     applied_begin = 42
     bench_params = {
@@ -294,7 +265,7 @@ def remote(
         #   combined     global forest plus a residual forest on cut and timeout
         'rl_algo': algo,
         # Optional standard CMAB RF Cut x FPT features (12 extra columns).
-        'enable_cmab_cut_fpt_cross_feature': True,
+        'enable_cmab_cut_fpt_cross_feature': False,
         # Online DQN; set rl_algo='dqn'. Only node0 trains, all primaries receive actions.
         'dqn_action_port': 19100,
         'dqn_learning_rate': 1e-3,
@@ -323,12 +294,6 @@ def remote(
         'rl_warmup_iterations': 5,
         'cmab_policy': policy,
         'cmab_start_pos': start_pos,
-        # None searches k in {1, 4}. 1 or 4 removes that dimension (48 arms).
-        'cmab_fixed_k': fixed_k,
-        # 0 disables. Otherwise each level needs this many clean samples
-        # before levels within cmab_factor_freeze_margin_ms collapse.
-        'cmab_factor_freeze_samples': freeze_samples,
-        'cmab_factor_freeze_margin_ms': freeze_margin,
         'enable_accelerator': False,
         'accelerator_period': 20,
 
@@ -355,7 +320,7 @@ def remote(
         'max_batch_delay': 5000,  # ms
         'use_optimistic_tips': True,
         'use_parallel_proposals': True,
-        'k': 4 if fixed_k is None else fixed_k,
+        'k': 4,
         'epoch_slots': 30,
         'window_size': 12,
         # Apply on first commit at/after this position (Rust uses >=).
@@ -375,7 +340,7 @@ def remote(
         'affected_nodes': [4],
         'asynchrony_nodes': [4],
         'asynchrony_regions': [[zone]],
-        'egress_penalty': [[[0]]],
+        'egress_penalty': [[[0, 10]]],
 
         'use_fast_sync': True,
         'use_exponential_timeouts': False,

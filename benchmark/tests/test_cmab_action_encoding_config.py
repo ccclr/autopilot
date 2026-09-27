@@ -174,61 +174,6 @@ class CMABActionEncodingConfigTests(TestCase):
 
         self.assertIn('--start-pos 39', command)
 
-    def test_fixed_k_defaults_to_none(self):
-        parameters = BenchParameters(_parameters())
-
-        self.assertIsNone(parameters.cmab_fixed_k)
-
-    def test_accepts_fixed_k(self):
-        parameters = BenchParameters(_parameters(cmab_fixed_k=4))
-
-        self.assertEqual(parameters.cmab_fixed_k, 4)
-
-    def test_rejects_unknown_fixed_k(self):
-        with self.assertRaisesRegex(ConfigError, 'cmab_fixed_k'):
-            BenchParameters(_parameters(cmab_fixed_k=2))
-
-    def test_controller_command_contains_fixed_k(self):
-        command = CommandMaker.run_controller(
-            node_index=0,
-            repo_name='autopilot',
-            log_dir='/local/logs',
-            parameters_file='/local/.parameters.json',
-            rl_algo='cmab',
-            cmab_fixed_k=4,
-        )
-
-        self.assertIn('--fixed-k 4', command)
-
-    def test_factor_freeze_defaults_off(self):
-        parameters = BenchParameters(_parameters())
-
-        self.assertEqual(parameters.cmab_factor_freeze_samples, 0)
-        self.assertEqual(parameters.cmab_factor_freeze_margin_ms, 30)
-
-    def test_accepts_factor_freeze_samples(self):
-        parameters = BenchParameters(_parameters(cmab_factor_freeze_samples=20))
-
-        self.assertEqual(parameters.cmab_factor_freeze_samples, 20)
-
-    def test_rejects_negative_factor_freeze_samples(self):
-        with self.assertRaisesRegex(ConfigError, 'cmab_factor_freeze_samples'):
-            BenchParameters(_parameters(cmab_factor_freeze_samples=-1))
-
-    def test_controller_command_contains_factor_freeze(self):
-        command = CommandMaker.run_controller(
-            node_index=0,
-            repo_name='autopilot',
-            log_dir='/local/logs',
-            parameters_file='/local/.parameters.json',
-            rl_algo='cmab',
-            cmab_factor_freeze_samples=20,
-            cmab_factor_freeze_margin_ms=30,
-        )
-
-        self.assertIn('--factor-freeze-samples 20', command)
-        self.assertIn('--factor-freeze-margin-ms 30', command)
-
 
 if __name__ == '__main__':
     import unittest

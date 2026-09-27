@@ -20,7 +20,6 @@ from offline_dataset import AsyncTransitionDatasetWriter
 from .accelerator import TrainingAccelerator
 from .arm_catalog import ArmCatalog
 from .context_builder import ContextBuilder
-from .factor_freeze import FactorFreezer
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +40,6 @@ class CMABTrainer:
         accelerator: Optional[TrainingAccelerator] = None,
         enable_accelerator: bool = False,
         accelerator_period: int = 100,
-        factor_freeze_samples: int = 0,
-        factor_freeze_margin_ms: float = 30.0,
         transition_writer: Optional[AsyncTransitionDatasetWriter] = None,
         latest_checkpoint_path: Optional[str] = None,
     ):
@@ -77,13 +74,6 @@ class CMABTrainer:
             )
         else:
             self.accelerator = None
-        if int(factor_freeze_samples) > 0:
-            self.factor_freezer = FactorFreezer(
-                min_samples=int(factor_freeze_samples),
-                margin_ms=float(factor_freeze_margin_ms),
-            )
-        else:
-            self.factor_freezer = None
 
     def run(self, num_iterations: Optional[int], checkpoint_freq: int):
         logger.info("Initializing CMAB training loop...")
@@ -103,14 +93,6 @@ class CMABTrainer:
             )
         else:
             logger.info("Accelerator disabled")
-        if self.factor_freezer is not None:
-            logger.info(
-                "Factor freeze enabled min_samples=%d margin_ms=%.1f",
-                self.factor_freezer.min_samples,
-                self.factor_freezer.margin_ms,
-            )
-        else:
-            logger.info("Factor freeze disabled")
         if getattr(self.policy, "policy_name", None) == "round_robin":
             start_pos = int(getattr(self.policy, "_round_robin_pos_offset", 0) or 0)
             logger.info(
@@ -151,10 +133,8 @@ class CMABTrainer:
                 if self.accelerator is not None:
                     self.accelerator.on_epoch(current_epoch)
                     self._apply_accelerator()
-                self._apply_factor_freeze()
                 shared_seed_hex = self._compute_shared_seed_hex(self.last_metrics_file)
-                covered = self._cover_arm()
-                arm = covered if covered is not None else self.policy.select_arm(
+                arm = self.policy.select_arm(
                     context,
                     shared_seed_hex=shared_seed_hex,
                     epoch=current_epoch,
@@ -254,14 +234,6 @@ class CMABTrainer:
                         reward,
                         use_arm,
                     )
-                if (
-                    self.factor_freezer is not None
-                    and apply_ok
-                    and not skips_learning
-                    and 0 < reward <= 15
-                ):
-                    self.factor_freezer.observe(use_arm, reward)
-                    self._apply_factor_freeze()
                 logger.info(
                     "Iteration %s : context=%s arm=%s params=%s",
                     iteration + 1,
@@ -423,40 +395,6 @@ class CMABTrainer:
             logger.exception(
                 "Failed to close CMAB transition writer; CMAB will continue"
             )
-
-    def _cover_arm(self) -> Optional[str]:
-        freezer = self.factor_freezer
-        if freezer is None or not hasattr(self.policy, "_arms"):
-            return None
-        if getattr(self.policy, "skips_learning", lambda: False)():
-            return None
-        if getattr(self.policy, "action_encoding", "numeric") == "one_hot":
-            return None
-        if hasattr(self.policy, "_factor_catalogs"):
-            return None
-        return freezer.cover_arm(list(self.policy._arms))
-
-    def _apply_factor_freeze(self) -> None:
-        freezer = self.factor_freezer
-        if freezer is None or not hasattr(self.policy, "_arms"):
-            return
-        if getattr(self.policy, "action_encoding", "numeric") == "one_hot":
-            return
-        if hasattr(self.policy, "_factor_catalogs"):
-            return
-        filtered = freezer.filter_arms(self.arm_catalog.list_arms())
-        if list(self.policy._arms) == filtered:
-            return
-        logger.info(
-            "FACTOR_FREEZE arms %d -> %d",
-            len(self.policy._arms),
-            len(filtered),
-        )
-        self.policy._arms = filtered
-        if hasattr(self.policy, "_arm_indices"):
-            self.policy._arm_indices = {
-                arm: index for index, arm in enumerate(filtered)
-            }
 
     def _apply_accelerator(self) -> None:
         if self.accelerator is None:

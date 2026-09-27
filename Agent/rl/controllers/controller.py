@@ -132,9 +132,6 @@ class AutopilotController:
         cmab_environment_label: str = "unlabeled",
         cmab_transition_run_id: Optional[str] = None,
         enable_cmab_cut_fpt_cross_feature: bool = False,
-        cmab_fixed_k: Optional[int] = None,
-        cmab_factor_freeze_samples: int = 0,
-        cmab_factor_freeze_margin_ms: float = 30.0,
     ):
         """
         Initialize controller
@@ -193,18 +190,6 @@ class AutopilotController:
         if max_training_iterations is not None and max_training_iterations <= 0:
             raise ValueError("max_training_iterations must be positive or None")
         self.enable_cmab_cut_fpt_cross_feature = bool(enable_cmab_cut_fpt_cross_feature)
-        if cmab_fixed_k in (None, ""):
-            self.cmab_fixed_k = None
-        else:
-            self.cmab_fixed_k = int(cmab_fixed_k)
-            if self.cmab_fixed_k not in (1, 4):
-                raise ValueError("cmab_fixed_k must be 1, 4, or unset")
-        self.cmab_factor_freeze_samples = int(cmab_factor_freeze_samples)
-        if self.cmab_factor_freeze_samples < 0:
-            raise ValueError("cmab_factor_freeze_samples must be an integer >= 0")
-        self.cmab_factor_freeze_margin_ms = float(cmab_factor_freeze_margin_ms)
-        if self.cmab_factor_freeze_margin_ms <= 0:
-            raise ValueError("cmab_factor_freeze_margin_ms must be positive")
         if self.enable_cmab_cut_fpt_cross_feature and (
             self.rl_algo != "cmab" or self.cmab_policy in ("factorized", "combined")
         ):
@@ -295,10 +280,7 @@ class AutopilotController:
         if self.rl_algo == "xgboost":
             return home / "xgboost_checkpoints"
         if self.rl_algo == "cmab" and self.enable_cmab_cut_fpt_cross_feature:
-            suffix = "" if self.cmab_fixed_k is None else f"_k{self.cmab_fixed_k}"
-            if self.cmab_factor_freeze_samples > 0:
-                suffix += f"_freeze{self.cmab_factor_freeze_samples}"
-            return home / "checkpoints" / f"cmab_{self.cmab_action_encoding}_cut_fpt{suffix}"
+            return home / "checkpoints" / f"cmab_{self.cmab_action_encoding}_cut_fpt"
         if self.rl_algo == "cmab" and self.cmab_policy == "factorized":
             return home / "checkpoints" / "cmab_factorized"
         if self.rl_algo == "cmab" and self.cmab_policy == "combined":
@@ -351,17 +333,6 @@ class AutopilotController:
             if self.resume_from:
                 cmd.extend(["--resume-from", str(self.resume_from)])
 
-            if self.rl_algo == "cmab" and self.cmab_fixed_k is not None:
-                cmd.extend(["--fixed-k", str(self.cmab_fixed_k)])
-            if self.rl_algo == "cmab" and self.cmab_factor_freeze_samples > 0:
-                cmd.extend(
-                    [
-                        "--factor-freeze-samples",
-                        str(self.cmab_factor_freeze_samples),
-                        "--factor-freeze-margin-ms",
-                        str(self.cmab_factor_freeze_margin_ms),
-                    ]
-                )
             if (
                 self.rl_algo == "cmab"
                 and self.enable_cmab_cut_fpt_cross_feature
@@ -570,25 +541,6 @@ def main():
 
     parser.add_argument("--max-training-iterations", type=int, default=None)
     parser.add_argument("--enable-cmab-cut-fpt-cross-feature", action="store_true")
-    parser.add_argument(
-        "--fixed-k",
-        type=int,
-        default=None,
-        choices=[1, 4],
-        help="Fix CMAB parallel proposals (k) to 1 or 4. Omit to search both.",
-    )
-    parser.add_argument(
-        "--factor-freeze-samples",
-        type=int,
-        default=0,
-        help="Clean samples required on every factor level before collapsing it. 0 disables.",
-    )
-    parser.add_argument(
-        "--factor-freeze-margin-ms",
-        type=float,
-        default=30.0,
-        help="Median latency gap below which equivalent factor levels collapse.",
-    )
     parser.add_argument('--dqn-action-endpoints', type=str, default=None)
     parser.add_argument('--dqn-action-timeout', type=float, default=2.0)
     parser.add_argument('--dqn-action-retries', type=int, default=2)
@@ -627,11 +579,6 @@ def main():
     print(f"🔁 Resume from: {args.resume_from}")
     print(f"🔥 Warmup iterations: {args.warmup_iterations}")
     print(f"🎯 CMAB policy: {args.policy}")
-    print(f"🔢 CMAB fixed k: {args.fixed_k}")
-    print(
-        "🧊 Factor freeze: samples="
-        f"{args.factor_freeze_samples} margin_ms={args.factor_freeze_margin_ms}"
-    )
     print(f"📍 CMAB start pos: {args.start_pos}")
     print(f"⚡ Accelerator: enabled={args.enable_accelerator} period={args.accelerator_period} epochs")
 
@@ -655,9 +602,6 @@ def main():
             cmab_start_pos=args.start_pos,
             max_training_iterations=args.max_training_iterations,
             enable_cmab_cut_fpt_cross_feature=args.enable_cmab_cut_fpt_cross_feature,
-            cmab_fixed_k=args.fixed_k,
-            cmab_factor_freeze_samples=args.factor_freeze_samples,
-            cmab_factor_freeze_margin_ms=args.factor_freeze_margin_ms,
             dqn_action_endpoints=args.dqn_action_endpoints,
             dqn_action_timeout=args.dqn_action_timeout,
             dqn_action_retries=args.dqn_action_retries,

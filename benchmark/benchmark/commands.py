@@ -311,9 +311,6 @@ class CommandMaker:
         dqn_seed=None,
         dqn_checkpoint_load_mode=None,
         enable_cmab_cut_fpt_cross_feature=False,
-        cmab_fixed_k=None,
-        cmab_factor_freeze_samples=0,
-        cmab_factor_freeze_margin_ms=30.0,
         cmab_transition_export_dir=None,
         cmab_environment_label=None,
         cmab_transition_run_id=None,
@@ -351,11 +348,6 @@ class CommandMaker:
             cmd += f' --accelerator-period {int(accelerator_period)}'
         if enable_cmab_cut_fpt_cross_feature:
             cmd += ' --enable-cmab-cut-fpt-cross-feature'
-        if cmab_fixed_k is not None:
-            cmd += f' --fixed-k {int(cmab_fixed_k)}'
-        if cmab_factor_freeze_samples:
-            cmd += f' --factor-freeze-samples {int(cmab_factor_freeze_samples)}'
-            cmd += f' --factor-freeze-margin-ms {float(cmab_factor_freeze_margin_ms)}'
         if cmab_transition_export_dir:
             cmd += (
                 ' --cmab-transition-export-dir '

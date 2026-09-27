@@ -32,8 +32,6 @@ needles = (
     "train_xgboost.py",
     "train_gp_bo.py",
     "train_kernel_ucb.py",
-    "train_dqn.py",
-    "controllers/action_receiver.py",
     "metrics_collector.py",
     "benchmark_client",
 )
