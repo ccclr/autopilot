@@ -310,7 +310,8 @@ class Bench:
             # Fetch into origin/<branch>, not into the checked-out local branch
             # (git refuses `fetch origin branch:branch` on a non-bare repo).
             f'(cd {repo} && git fetch origin {branch})',
-            f'(cd {repo} && git checkout -B {branch} origin/{branch})',
+            # -f discards local edits that would otherwise make checkout abort.
+            f'(cd {repo} && git checkout -f -B {branch} origin/{branch})',
             f'(cd {repo} && git reset --hard origin/{branch})',
             f'source {self.home}/.cargo/env',
             f'(cd {repo} && {CommandMaker.compile()})',

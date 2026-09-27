@@ -37,15 +37,31 @@ class CommandMaker:
         return 'python3'
 
     @staticmethod
-    def ensure_agent_venv(requirements_file):
-        """Create the Agent venv locally and install dependencies."""
+    def _remove_tree(path):
+        """Remove a tree, using sudo when a previous user owns it."""
         import shutil
 
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            subprocess.run(['sudo', '-n', 'rm', '-rf', path], check=True)
+
+    @staticmethod
+    def _venv_writable(venv_path):
+        bin_dir = os.path.join(venv_path, 'bin')
+        return os.path.isdir(venv_path) and os.access(venv_path, os.W_OK) and os.access(bin_dir, os.W_OK)
+
+    @staticmethod
+    def ensure_agent_venv(requirements_file):
+        """Create the Agent venv locally and install dependencies."""
         venv_path = CommandMaker.AGENT_VENV_PATH
         venv_python = CommandMaker.agent_venv_python()
-        broken = os.path.isdir(venv_path) and not os.path.isfile(venv_python)
-        if broken:
-            shutil.rmtree(venv_path, ignore_errors=True)
+        # A root-owned venv still has a python binary, but pip cannot replace it.
+        unusable = os.path.isdir(venv_path) and (
+            not os.path.isfile(venv_python) or not CommandMaker._venv_writable(venv_path)
+        )
+        if unusable:
+            CommandMaker._remove_tree(venv_path)
         if not os.path.isdir(venv_path):
             subprocess.run(
                 ['python3', '-m', 'venv', venv_path],
@@ -95,8 +111,9 @@ class CommandMaker:
             'sudo apt-get update -qq',
             'sudo apt-get -y -qq install python3-pip python3-venv',
             (
-                f'if [ ! -x {venv_python} ]; then '
-                f'rm -rf {venv_path}; python3 -m venv {venv_path}; fi'
+                f'if [ ! -x {venv_python} ] || [ ! -w {venv_path} ]; then '
+                f'rm -rf {venv_path} 2>/dev/null || sudo -n rm -rf {venv_path}; '
+                f'python3 -m venv {venv_path}; fi'
             ),
             f'({venv_python} -m ensurepip --upgrade || true)',
             f'{venv_python} -m pip install -q --upgrade pip',
@@ -216,7 +233,9 @@ class CommandMaker:
     def alias_binaries(origin):
         assert isinstance(origin, str)
         node, client = join(origin, 'node'), join(origin, 'benchmark_client')
-        return f'rm -f node benchmark_client ; ln -s {node} . ; ln -s {client} .'
+        # -f -n replaces an existing symlink or file. && keeps this from
+        # running when an earlier step in the same chain failed.
+        return f'ln -sfn {node} node && ln -sfn {client} benchmark_client'
 
     @staticmethod
     def run_metrics_collector(epoch_slots, window_size, node_index=None, repo_name=None, log_dir=None, parameters_file=None, python_bin=None, metrics_dir=None):

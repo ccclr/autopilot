@@ -201,14 +201,27 @@ def remote(
     debug=False,
     cmab_seed=0,
     cmab_action_encoding='numeric',
-    duration=120,
+    duration=3600,
+    rl_algo='cmab',
     cmab_policy='combined',
     cmab_start_pos=0,
+    start_controller=True,
 ):
-    ''' Run benchmarks on GCP. '''
+    ''' Run benchmarks on GCP.
+
+    rl_algo: cmab, xgboost, gp_bo, kernel_ucb, dqn.
+    cmab_policy applies when rl_algo is cmab:
+      rf_ts, random, default, round_robin, factorized, combined.
+    Omit the controller with --no-start-controller.
+    '''
     encoding = str(cmab_action_encoding).lower()
     if encoding not in ('numeric', 'one_hot'):
         raise ValueError('cmab_action_encoding must be "numeric" or "one_hot"')
+    algo = str(rl_algo).lower()
+    if algo not in ('cmab', 'xgboost', 'gp_bo', 'kernel_ucb', 'dqn'):
+        raise ValueError(
+            'rl_algo must be one of cmab, xgboost, gp_bo, kernel_ucb, dqn'
+        )
     policy = str(cmab_policy).lower()
     if policy not in (
         'rf_ts', 'random', 'default', 'round_robin', 'factorized', 'combined'
@@ -217,6 +230,8 @@ def remote(
             'cmab_policy must be one of rf_ts, random, default, '
             'round_robin, factorized, combined'
         )
+    if not isinstance(start_controller, bool):
+        raise ValueError('start_controller must be a boolean')
     zone = InstanceManager.make().settings.regions[0]
     try:
         start_pos = int(cmab_start_pos)
@@ -240,8 +255,15 @@ def remote(
 
         # CMAB: set a checkpoint path to resume RL, or None to train from scratch.
         'cmab_resume_from': resume_from,
-        # RL algorithm: "cmab", "xgboost", "gp_bo", "kernel_ucb", or "dqn"
-        'rl_algo': 'cmab',
+        # rl_algo: cmab | xgboost | gp_bo | kernel_ucb | dqn
+        # cmab_policy (only forwarded when rl_algo is cmab):
+        #   rf_ts        global random forest, pick the highest predicted arm
+        #   random       uniform arm each epoch; the forest is not used to choose
+        #   default      one fixed arm (batch 500000, header 32, cut 3, timeout 200, k 1)
+        #   round_robin  cycle the shuffled catalog; no model update; see cmab_start_pos
+        #   factorized   per-parameter residual forests, then pick the best arm
+        #   combined     global forest plus a residual forest on cut and timeout
+        'rl_algo': algo,
         # Optional standard CMAB RF Cut x FPT features (12 extra columns).
         'enable_cmab_cut_fpt_cross_feature': False,
         # Online DQN; set rl_algo='dqn'. Only node0 trains, all primaries receive actions.
@@ -266,12 +288,10 @@ def remote(
 
         # CMAB-RF action representation. Use "numeric" for the existing
         # baseline and "one_hot" for the encoding comparison experiment.
-        'cmab_action_encoding': "numeric",
+        'cmab_action_encoding': encoding,
         # Pair numeric/one_hot with the same seed; change only between reps.
-        'cmab_seed': 0,
+        'cmab_seed': int(cmab_seed),
         'rl_warmup_iterations': 3,
-        # rf_ts: global RF. factorized / combined: dedicated reward models.
-        # random / default / round_robin: selection-only.
         'cmab_policy': policy,
         'cmab_start_pos': start_pos,
         'enable_accelerator': False,
@@ -331,7 +351,9 @@ def remote(
         'data_pollution_strategy': 'random_scale',
     }
     try:
-        Bench(ctx).run(bench_params, node_params, debug)
+        Bench(ctx).run(
+            bench_params, node_params, debug, start_controller=start_controller
+        )
     except BenchError as e:
         Print.error(e)
 
