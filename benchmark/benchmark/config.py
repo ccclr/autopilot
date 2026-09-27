@@ -299,6 +299,45 @@ class BenchParameters:
             if cmab_seed < 0:
                 raise ConfigError('cmab_seed must be an integer >= 0')
             self.cmab_seed = cmab_seed
+            raw_fixed_k = json.get('cmab_fixed_k', None)
+            if raw_fixed_k in (None, '', 0, '0'):
+                self.cmab_fixed_k = None
+            else:
+                try:
+                    fixed_k = int(raw_fixed_k)
+                except (TypeError, ValueError) as e:
+                    raise ConfigError('cmab_fixed_k must be 1, 4, or null') from e
+                if fixed_k not in (1, 4):
+                    raise ConfigError('cmab_fixed_k must be 1, 4, or null')
+                self.cmab_fixed_k = fixed_k
+            raw_freeze_samples = json.get('cmab_factor_freeze_samples', 0)
+            if raw_freeze_samples in (None, ''):
+                raw_freeze_samples = 0
+            try:
+                freeze_samples = int(raw_freeze_samples)
+            except (TypeError, ValueError) as e:
+                raise ConfigError(
+                    'cmab_factor_freeze_samples must be an integer >= 0'
+                ) from e
+            if freeze_samples < 0:
+                raise ConfigError(
+                    'cmab_factor_freeze_samples must be an integer >= 0'
+                )
+            self.cmab_factor_freeze_samples = freeze_samples
+            raw_freeze_margin = json.get('cmab_factor_freeze_margin_ms', 30)
+            if raw_freeze_margin in (None, ''):
+                raw_freeze_margin = 30
+            try:
+                freeze_margin = float(raw_freeze_margin)
+            except (TypeError, ValueError) as e:
+                raise ConfigError(
+                    'cmab_factor_freeze_margin_ms must be a positive number'
+                ) from e
+            if freeze_margin <= 0:
+                raise ConfigError(
+                    'cmab_factor_freeze_margin_ms must be a positive number'
+                )
+            self.cmab_factor_freeze_margin_ms = freeze_margin
             enable_cmab_cut_fpt_cross_feature = json.get(
                 'enable_cmab_cut_fpt_cross_feature', False
             )

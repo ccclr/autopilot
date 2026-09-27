@@ -79,6 +79,29 @@ def main():
         default=100,
         help="Epochs between master latency probes (apply 5 epochs later).",
     )
+    parser.add_argument(
+        "--fixed-k",
+        type=int,
+        default=None,
+        choices=[1, 4],
+        help="Fix parallel proposals (k) to this value. Omit to search {1, 4}.",
+    )
+    parser.add_argument(
+        "--factor-freeze-samples",
+        type=int,
+        default=0,
+        help=(
+            "Collapse a factor once every level has this many clean samples "
+            "and the median-latency gap is within --factor-freeze-margin-ms. "
+            "0 disables."
+        ),
+    )
+    parser.add_argument(
+        "--factor-freeze-margin-ms",
+        type=float,
+        default=30.0,
+        help="Median latency gap below which equivalent factor levels collapse.",
+    )
     parser.add_argument("--enable-cut-fpt-cross-feature", action="store_true")
     parser.add_argument("--transition-export-dir", default=None)
     parser.add_argument("--environment-label", default="unlabeled")
@@ -91,18 +114,22 @@ def main():
     logger.info("Starting Autopilot Continuous CMAB Training")
     logger.info(
         "metrics_dir=%s parameters_file=%s warmup=%d action_encoding=%s "
-        "policy=%s seed=%d",
+        "policy=%s seed=%d fixed_k=%s factor_freeze_samples=%d margin_ms=%.1f",
         args.metrics_dir,
         args.parameters_file,
         warmup_iterations,
         args.action_encoding,
         args.policy,
         args.seed,
+        args.fixed_k,
+        args.factor_freeze_samples,
+        args.factor_freeze_margin_ms,
     )
 
-    codec = ActionCodec(policy=args.policy)
+    codec = ActionCodec(policy=args.policy, fixed_k=args.fixed_k)
     arm_catalog = ArmCatalog(codec=codec, max_arms=args.max_arms, seed=args.seed)
     arms = arm_catalog.list_arms()
+    logger.info("CMAB catalog arms=%d fixed_k=%s", len(arms), args.fixed_k)
     feature_dim = len(arm_catalog.decode_arm(arms[0])) if arms else 0
     if args.policy == "factorized":
         policy = FactorizedCMABPolicy(
@@ -190,6 +217,8 @@ def main():
         warmup_iterations=warmup_iterations,
         enable_accelerator=args.enable_accelerator,
         accelerator_period=args.accelerator_period,
+        factor_freeze_samples=args.factor_freeze_samples,
+        factor_freeze_margin_ms=args.factor_freeze_margin_ms,
         transition_writer=transition_writer,
         latest_checkpoint_path=(str(transition_writer.run_dir / "cmab_checkpoint_latest.pkl")
                                 if transition_writer is not None else None),

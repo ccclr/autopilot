@@ -12,7 +12,7 @@ class ActionCodec:
     3. System maps indices to actual values (e.g., batch_size = batch_size_values[batch_size_idx])
     """
 
-    def __init__(self, policy: str = "rf_ts"):
+    def __init__(self, policy: str = "rf_ts", fixed_k: Optional[int] = None):
         """
         Initialize action encoder, define legal value sets and action dimensions
         
@@ -41,6 +41,11 @@ class ActionCodec:
             self.fast_path_timeout_ms_bounds = (0, 300)  # continuous ms interval for GP-BO
             self.parallel_proposals_values = [1, 4]  # 1 to 3 parallel proposals
             # self.use_optimistic_tips_values = [True, False]  # True or False
+            if fixed_k is not None:
+                fixed_k = int(fixed_k)
+                if fixed_k not in (1, 4):
+                    raise ValueError(f"fixed_k must be 1 or 4, got {fixed_k}")
+                self.parallel_proposals_values = [fixed_k]
 
         # self.batch_size_values = [100000]
         # self.header_size_values = [32]
