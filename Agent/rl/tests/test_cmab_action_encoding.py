@@ -92,21 +92,24 @@ class CMABActionEncodingTests(unittest.TestCase):
         self.assertEqual(catalog.list_arms(), original_arms)
         self.assertNotIn(external_arm, catalog.list_arms())
 
-    def test_accelerator_adds_computed_timeout_to_rf_arms(self) -> None:
+    def test_accelerator_keeps_first_grid_timeout_covering_twice_cap(self) -> None:
         catalog = ArmCatalog(codec=ActionCodec(policy="rf_ts"))
-        accelerator = TrainingAccelerator()
-        accelerator._applied_cap = 38.0
+        original_arms = catalog.list_arms()
 
-        arms = accelerator.filter_arms(catalog.list_arms())
-        timeouts = {
-            int(part.split("=", 1)[1])
-            for arm in arms
-            for part in arm.split(",")
-            if part.startswith("fast_path_timeout=")
-        }
+        def retained(cap: float) -> tuple[int, set[int]]:
+            accelerator = TrainingAccelerator()
+            accelerator._applied_cap = cap
+            arms = accelerator.filter_arms(original_arms)
+            timeouts = {
+                int(part.split("=", 1)[1])
+                for arm in arms
+                for part in arm.split(",")
+                if part.startswith("fast_path_timeout=")
+            }
+            return len(arms), timeouts
 
-        self.assertEqual(timeouts, {0, 38})
-        self.assertEqual(len(arms), 48)
+        self.assertEqual(retained(33.0), (48, {0, 100}))
+        self.assertEqual(retained(62.0), (72, {0, 100, 200}))
 
     def test_numeric_rf_can_update_accelerator_generated_arm(self) -> None:
         policy = self._policy("numeric")

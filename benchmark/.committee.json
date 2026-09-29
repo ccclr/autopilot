@@ -1,6 +1,6 @@
 {
     "authorities": {
-        "+fUUm7CaL3rOIN2kSpfxoZN++LPD0pdKACX9Z3uL9pY=": {
+        "DKWvvDTpngA+opeIILRDSO1cl365YmJKH+44M4en0/s=": {
             "consensus": {
                 "consensus_to_consensus": "10.182.0.2:5012"
             },
@@ -17,41 +17,24 @@
                 }
             }
         },
-        "EyNXqbqobF+yaB1pyWIjHEm18ylVUErdjQJRwF7kpQQ=": {
+        "Q+En3nZn9q7HCYB3x+bSHdjITPHKVzaaRC42rIDFOrk=": {
             "consensus": {
-                "consensus_to_consensus": "10.128.0.2:5000"
+                "consensus_to_consensus": "10.128.0.2:5006"
             },
             "primary": {
-                "primary_to_primary": "10.128.0.2:5001",
-                "worker_to_primary": "10.128.0.2:5002"
+                "primary_to_primary": "10.128.0.2:5007",
+                "worker_to_primary": "10.128.0.2:5008"
             },
             "stake": 1,
             "workers": {
                 "0": {
-                    "primary_to_worker": "10.128.0.2:5003",
-                    "transactions": "10.128.0.2:5004",
-                    "worker_to_worker": "10.128.0.2:5005"
+                    "primary_to_worker": "10.128.0.2:5009",
+                    "transactions": "10.128.0.2:5010",
+                    "worker_to_worker": "10.128.0.2:5011"
                 }
             }
         },
-        "okARN/ojolmBWCxMSQSZtk/wEASBNkPz43nQn+SFX+o=": {
-            "consensus": {
-                "consensus_to_consensus": "10.140.0.3:5006"
-            },
-            "primary": {
-                "primary_to_primary": "10.140.0.3:5007",
-                "worker_to_primary": "10.140.0.3:5008"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.140.0.3:5009",
-                    "transactions": "10.140.0.3:5010",
-                    "worker_to_worker": "10.140.0.3:5011"
-                }
-            }
-        },
-        "rDPPTjd/AIEKcHkLLsgQJoBC4pmhhaeQVsGPzjTmsyQ=": {
+        "aplQEScUOTeNq6DDwrw2P80c3mGWY62VIY8B9aNIDjU=": {
             "consensus": {
                 "consensus_to_consensus": "10.146.0.3:5018"
             },
@@ -65,6 +48,23 @@
                     "primary_to_worker": "10.146.0.3:5021",
                     "transactions": "10.146.0.3:5022",
                     "worker_to_worker": "10.146.0.3:5023"
+                }
+            }
+        },
+        "zhFPLdzUDna5K9+l68tXXbwBW4Q4xuQ8aMf2s/iIPnA=": {
+            "consensus": {
+                "consensus_to_consensus": "10.140.0.3:5000"
+            },
+            "primary": {
+                "primary_to_primary": "10.140.0.3:5001",
+                "worker_to_primary": "10.140.0.3:5002"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.140.0.3:5003",
+                    "transactions": "10.140.0.3:5004",
+                    "worker_to_worker": "10.140.0.3:5005"
                 }
             }
         }

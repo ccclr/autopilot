@@ -7,10 +7,11 @@ Fast path needs every vote. After a leader has a quorum (2f+1) it still
 waits `fast_path_timeout` for the last vote.
   timeout >= Δ_i → leader i takes the fast path.
 Δ_i is that leader's gap from the quorum vote to the last vote.
-The exploration upper bound is ceil(max_i Δ_i) plus a 10 ms margin, so a
-small RTT underestimate still leaves every leader on the fast path.
-Timeouts strictly above that bound are not explored. Smaller timeouts
-stay in the search space.
+The RTT cap is ceil(max_i Δ_i) plus a 10 ms margin. Readiness delay can
+make the useful timeout larger than that cap, so discrete search keeps
+every catalog timeout up to the first grid value that is at least
+2 × cap. For caps of 33 ms and 62 ms on [0, 100, 200, 300], the retained
+timeouts are [0, 100] and [0, 100, 200].
 
 The master is the replica that launched `fab remote`, not a fixed node
 index. It probes the ICMP RTT full matrix and publishes a hint
@@ -40,6 +41,8 @@ HINT_NAME = ".accelerator.json"
 APPLY_DELAY_EPOCHS = 5
 # Extra milliseconds above ceil(max Δ). Covers ping noise and a short RTT underestimate.
 TIMEOUT_CAP_MARGIN_MS = 10
+# Readiness delay can exceed the RTT gap, so the discrete bound is 2 × cap.
+TIMEOUT_GRID_SAFETY_FACTOR = 2
 
 
 def _remaining_dims(arms: Iterable[str]) -> dict[str, list[str]]:
@@ -71,21 +74,23 @@ def _arm_timeout(arm: str) -> float:
     return 0.0
 
 
-def _with_arm_timeout(arm: str, timeout: float) -> str:
-    """Return the same arm with ``fast_path_timeout`` replaced."""
-    value = str(int(timeout)) if float(timeout).is_integer() else f"{float(timeout):g}"
-    parts = []
-    replaced = False
-    for part in arm.split(","):
-        key, sep, _old_value = part.partition("=")
-        if sep and key.strip() == _TIMEOUT_KEY:
-            parts.append(f"{key.strip()}={value}")
-            replaced = True
-        else:
-            parts.append(part)
-    if not replaced:
-        raise ValueError(f"Arm is missing {_TIMEOUT_KEY}: {arm}")
-    return ",".join(parts)
+def grid_timeout_upper_bound(
+    cap_ms: float,
+    timeouts: Iterable[float],
+    factor: float = TIMEOUT_GRID_SAFETY_FACTOR,
+) -> Optional[float]:
+    """Smallest catalog timeout that is at least ``factor × cap``.
+
+    Returns the largest catalog timeout when the doubled cap is above the grid.
+    """
+    target = float(factor) * float(cap_ms)
+    grid = sorted({float(timeout) for timeout in timeouts if math.isfinite(float(timeout))})
+    if not grid:
+        return None
+    for timeout in grid:
+        if timeout >= target:
+            return timeout
+    return grid[-1]
 
 
 def max_fast_path_delta_ms(matrix: np.ndarray) -> Optional[float]:
@@ -299,50 +304,44 @@ class TrainingAccelerator:
             return None
 
     def covering_timeout(self, timeouts: Iterable[float] | None = None) -> Optional[float]:
-        """Exploration upper bound: the timeout that lets every leader fast-path.
+        """Grid timeout that covers ``2 × cap``.
 
-        ``timeouts`` is ignored. The bound is the probed cap itself, not the
-        next catalog entry above it.
+        With catalog values ``[0, 100, 200, 300]``, a 33 ms cap returns 100
+        and a 62 ms cap returns 200.
         """
-        del timeouts
         cap = self.timeout_cap
         if cap is None:
             return None
-        return float(cap)
+        if timeouts is None:
+            return float(TIMEOUT_GRID_SAFETY_FACTOR) * float(cap)
+        return grid_timeout_upper_bound(cap, timeouts)
 
-    def filter_arms(
-        self, arms: Iterable[str], include_cap: bool = True
-    ) -> list[str]:
-        """Keep timeouts up to the cap and add the computed cap itself.
-
-        The catalog may contain only coarse values such as 0/100/200/300. If
-        the measured cap is 38 ms, RF should explore both 0 and 38 rather than
-        collapsing the timeout dimension to only 0.
-        """
+    def filter_arms(self, arms: Iterable[str]) -> list[str]:
+        """Keep catalog arms whose timeout is at most the ``2 × cap`` grid bound."""
         arms = list(arms)
         cap = self.timeout_cap
         if cap is None:
             return arms
         timeouts = [_arm_timeout(a) for a in arms]
-        kept = [a for a, t in zip(arms, timeouts) if t <= cap]
-        if include_cap and math.isfinite(cap):
-            # One synthetic cap arm per unique combination of the other
-            # parameters. dict preserves the catalog's deterministic order.
-            cap_arms = dict.fromkeys(_with_arm_timeout(arm, cap) for arm in arms)
-            kept.extend(arm for arm in cap_arms if arm not in kept)
+        limit = grid_timeout_upper_bound(cap, timeouts)
+        if limit is None:
+            return arms
+        kept = [a for a, t in zip(arms, timeouts) if t <= limit]
         if not kept:
             smallest = min(timeouts)
             kept = [a for a, t in zip(arms, timeouts) if t == smallest]
             logger.warning(
-                "ACCELERATOR cap=%.1f is below every catalog timeout; "
+                "ACCELERATOR cap=%.1f grid_hi=%.1f is below every catalog timeout; "
                 "keeping smallest timeout %.1f",
                 cap,
+                limit,
                 smallest,
             )
         if len(kept) < len(arms):
             logger.info(
-                "ACCELERATOR prune timeout_cap=%.1f arms %d -> %d remaining=%s",
+                "ACCELERATOR prune timeout_cap=%.1f grid_hi=%.1f arms %d -> %d remaining=%s",
                 cap,
+                limit,
                 len(arms),
                 len(kept),
                 _remaining_dims(kept),
