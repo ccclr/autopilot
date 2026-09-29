@@ -294,8 +294,8 @@ def remote(
         'rl_warmup_iterations': 5,
         'cmab_policy': policy,
         'cmab_start_pos': start_pos,
-        'enable_accelerator': False,
-        'accelerator_period': 20,
+        'enable_accelerator': True,
+        'accelerator_period': 10,
 
         # Unused
         'simulate_partition': False,

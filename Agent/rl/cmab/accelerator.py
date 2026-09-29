@@ -12,10 +12,11 @@ small RTT underestimate still leaves every leader on the fast path.
 Timeouts strictly above that bound are not explored. Smaller timeouts
 stay in the search space.
 
-Only the master (node 0) probes the ICMP RTT full matrix.
-It publishes a hint {timeout_cap, detect_epoch, apply_epoch} to every node.
-Followers only read the hint. The cap is applied at apply_epoch
-(detect_epoch + apply_delay), e.g. probe at epoch 100, apply at 105.
+The master is the replica that launched `fab remote`, not a fixed node
+index. It probes the ICMP RTT full matrix and publishes a hint
+{timeout_cap, detect_epoch, apply_epoch} to every node. Followers only
+read the hint. The cap is applied at apply_epoch (detect_epoch +
+apply_delay), e.g. probe at epoch 100, apply at 105.
 """
 
 from __future__ import annotations
@@ -109,12 +110,53 @@ def fast_path_timeout_cap_ms(delta_ms: float, margin_ms: float = TIMEOUT_CAP_MAR
     return float(math.ceil(float(delta_ms)) + float(margin_ms))
 
 
+_GCP_CREDENTIALS_NAME = "bright-meridian-486618-b3-a76d90aff895.json"
+
+
+def _prepare_gcp_credentials() -> None:
+    """Point ADC at the service-account file before any GCP client starts.
+
+    ``~/.bashrc`` returns immediately in a non-interactive probe, so the
+    export has to happen in this process.
+    """
+    cred = Path.home() / _GCP_CREDENTIALS_NAME
+    if cred.is_file():
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(cred)
+    else:
+        logger.warning("ACCELERATOR GCP credentials file missing: %s", cred)
+
+
+def _ensure_system_fabric() -> None:
+    """Let the venv trainer import the system fabric used by `fab`."""
+    try:
+        import fabric  # noqa: F401
+        return
+    except ImportError:
+        pass
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            [
+                "/usr/bin/python3",
+                "-c",
+                "import fabric, os; print(os.path.dirname(os.path.dirname(fabric.__file__)))",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return
+    if out and out not in sys.path:
+        sys.path.append(out)
+
+
 def _fabfile():
     os.environ["PATH"] = os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")
     import site
     for p in (site.getusersitepackages(), "/usr/lib/python3/dist-packages", str(_BENCH_DIR)):
         if p and p not in sys.path:
             sys.path.append(p)
+    _ensure_system_fabric()
     import fabfile as mod
 
     return mod
@@ -182,6 +224,7 @@ class TrainingAccelerator:
         cwd = os.getcwd()
         try:
             os.chdir(_BENCH_DIR)
+            _prepare_gcp_credentials()
             fab = _fabfile()
             matrix = fab.collect_latency_matrix(quiet=True)
             delta_ms = max_fast_path_delta_ms(matrix)

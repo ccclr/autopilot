@@ -290,6 +290,7 @@ class CommandMaker:
         warmup_iterations=None,
         enable_accelerator=None,
         accelerator_period=None,
+        accelerator_master=None,
         cmab_policy=None,
         cmab_start_pos=None,
         max_training_iterations=None,
@@ -340,6 +341,10 @@ class CommandMaker:
             cmd += f' --warmup-iterations {int(warmup_iterations)}'
         if enable_accelerator:
             cmd += ' --enable-accelerator'
+        if accelerator_master is True:
+            cmd += ' --accelerator-master'
+        elif accelerator_master is False:
+            cmd += ' --no-accelerator-master'
         if cmab_policy:
             cmd += f' --policy {shlex.quote(str(cmab_policy))}'
         if cmab_start_pos is not None:

@@ -40,6 +40,7 @@ class CMABTrainer:
         accelerator: Optional[TrainingAccelerator] = None,
         enable_accelerator: bool = False,
         accelerator_period: int = 100,
+        accelerator_master: Optional[bool] = None,
         transition_writer: Optional[AsyncTransitionDatasetWriter] = None,
         latest_checkpoint_path: Optional[str] = None,
     ):
@@ -67,9 +68,11 @@ class CMABTrainer:
             self.accelerator = accelerator
         elif enable_accelerator:
             hint_path = self.parameters_file.parent / ".accelerator.json"
+            if accelerator_master is None:
+                accelerator_master = self.node_index == 0
             self.accelerator = TrainingAccelerator(
                 period=accelerator_period,
-                is_master=(self.node_index == 0),
+                is_master=bool(accelerator_master),
                 hint_path=hint_path,
             )
         else:

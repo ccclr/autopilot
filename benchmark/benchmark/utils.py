@@ -1,4 +1,6 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
+import socket
+import subprocess
 from os.path import join
 
 
@@ -148,3 +150,19 @@ def progress_bar(iterable, prefix='', suffix='', decimals=1, length=30, fill='â–
         yield item
         printProgressBar(i + 1)
     print()
+
+
+def launcher_ips():
+    """IPs of the machine running fab, excluding loopback."""
+    ips = set()
+    try:
+        ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+    except Exception:
+        pass
+    try:
+        output = subprocess.check_output(["hostname", "-I"], text=True).strip()
+        if output:
+            ips.update(output.split())
+    except Exception:
+        pass
+    return {ip for ip in ips if ip and not ip.startswith("127.")}

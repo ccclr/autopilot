@@ -108,6 +108,7 @@ class AutopilotController:
         warmup_iterations: int = 5,
         enable_accelerator: bool = False,
         accelerator_period: int = 100,
+        accelerator_master: Optional[bool] = None,
         cmab_policy: str = "rf_ts",
         cmab_start_pos: int = 0,
         max_training_iterations: Optional[int] = None,
@@ -171,6 +172,7 @@ class AutopilotController:
         self.warmup_iterations = max(0, int(warmup_iterations))
         self.enable_accelerator = bool(enable_accelerator)
         self.accelerator_period = max(1, int(accelerator_period))
+        self.accelerator_master = accelerator_master
         self.cmab_policy = str(cmab_policy or "rf_ts").lower()
         if self.cmab_policy not in (
             "rf_ts",
@@ -317,6 +319,10 @@ class AutopilotController:
                 cmd.extend(["--accelerator-period", str(self.accelerator_period)])
             if self.enable_accelerator and self.rl_algo != "dqn":
                 cmd.append("--enable-accelerator")
+            if self.accelerator_master is True:
+                cmd.append("--accelerator-master")
+            elif self.accelerator_master is False:
+                cmd.append("--no-accelerator-master")
             if self.rl_algo == "cmab":
                 cmd.extend(["--policy", str(self.cmab_policy)])
                 cmd.extend(["--start-pos", str(self.cmab_start_pos)])
@@ -533,6 +539,12 @@ def main():
         help='Enable periodic latency probing to prune fast_path_timeout',
     )
     parser.add_argument(
+        '--accelerator-master',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help='This replica is the fab-remote host and runs latency probes',
+    )
+    parser.add_argument(
         '--accelerator-period',
         type=int,
         default=100,
@@ -580,7 +592,10 @@ def main():
     print(f"🔥 Warmup iterations: {args.warmup_iterations}")
     print(f"🎯 CMAB policy: {args.policy}")
     print(f"📍 CMAB start pos: {args.start_pos}")
-    print(f"⚡ Accelerator: enabled={args.enable_accelerator} period={args.accelerator_period} epochs")
+    print(
+        f"⚡ Accelerator: enabled={args.enable_accelerator} "
+        f"period={args.accelerator_period} epochs master={args.accelerator_master}"
+    )
 
     # Logger will be initialized by AutopilotController
 
@@ -598,6 +613,7 @@ def main():
             warmup_iterations=args.warmup_iterations,
             enable_accelerator=args.enable_accelerator,
             accelerator_period=args.accelerator_period,
+            accelerator_master=args.accelerator_master,
             cmab_policy=args.policy,
             cmab_start_pos=args.start_pos,
             max_training_iterations=args.max_training_iterations,

@@ -68,6 +68,12 @@ def main():
         default=100,
         help="Epochs between master latency probes (apply 5 epochs later).",
     )
+    parser.add_argument(
+        "--accelerator-master",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="This process is the fab-remote host and runs latency probes.",
+    )
     args = parser.parse_args()
 
     warmup_iterations = max(0, int(args.warmup_iterations))
@@ -116,6 +122,7 @@ def main():
         checkpoint_prefix="xgboost_checkpoint",
         enable_accelerator=args.enable_accelerator,
         accelerator_period=args.accelerator_period,
+        accelerator_master=args.accelerator_master,
     )
 
     trainer.run(num_iterations=args.num_iterations, checkpoint_freq=args.checkpoint_freq)

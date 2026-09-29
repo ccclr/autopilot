@@ -16,7 +16,7 @@ import shlex
 import subprocess
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
-from benchmark.utils import BenchError, Print, PathMaker, progress_bar
+from benchmark.utils import BenchError, Print, PathMaker, launcher_ips, progress_bar
 from benchmark.commands import CommandMaker
 from benchmark.rl_runtime import controller_options, start_dqn_receivers
 from benchmark.logs import LogParser, ParseError
@@ -576,6 +576,25 @@ class Bench:
             Print.info(f'CMAB policy: {cmab_policy}')
             Print.info(f'CMAB start pos: {cmab_start_pos}')
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
+            master_index = None
+            if enable_accelerator:
+                local_ips = launcher_ips()
+                master_index = next(
+                    (i for i, address in enumerate(primary_addresses)
+                     if Committee.ip(address) in local_ips),
+                    None,
+                )
+                if master_index is None:
+                    Print.warn(
+                        'fab host is not a committee replica; '
+                        'accelerator master falls back to node 0'
+                    )
+                else:
+                    Print.info(
+                        f'Accelerator master is node {master_index} '
+                        f'({Committee.ip(primary_addresses[master_index])}), '
+                        f'the machine running fab remote'
+                    )
             if resume_from:
                 Print.info(f'RL resume-from: {resume_from}')
             dqn_endpoints = start_dqn_receivers(
@@ -608,6 +627,9 @@ class Bench:
                     warmup_iterations=warmup_iterations,
                     enable_accelerator=enable_accelerator,
                     accelerator_period=accelerator_period,
+                    accelerator_master=(
+                        (i == master_index) if master_index is not None else None
+                    ),
                     cmab_policy=(cmab_policy if rl_algo == 'cmab' else None),
                     cmab_start_pos=(cmab_start_pos if rl_algo == 'cmab' else None),
                 )

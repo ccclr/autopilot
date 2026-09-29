@@ -79,6 +79,12 @@ def main():
         default=100,
         help="Epochs between master latency probes (apply 5 epochs later).",
     )
+    parser.add_argument(
+        "--accelerator-master",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="This process is the fab-remote host and runs latency probes.",
+    )
     parser.add_argument("--enable-cut-fpt-cross-feature", action="store_true")
     parser.add_argument("--transition-export-dir", default=None)
     parser.add_argument("--environment-label", default="unlabeled")
@@ -190,6 +196,7 @@ def main():
         warmup_iterations=warmup_iterations,
         enable_accelerator=args.enable_accelerator,
         accelerator_period=args.accelerator_period,
+        accelerator_master=args.accelerator_master,
         transition_writer=transition_writer,
         latest_checkpoint_path=(str(transition_writer.run_dir / "cmab_checkpoint_latest.pkl")
                                 if transition_writer is not None else None),
