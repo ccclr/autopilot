@@ -1,70 +1,70 @@
 {
     "authorities": {
-        "2sao0nxvgCFUml+Zg7pQ7VD8pdmY9OWNdAqnJjemn9s=": {
+        "CO1l0v+/kF8JtEbD7Buifnj9x1ojr22qCvDHp0yUkXw=": {
             "consensus": {
-                "consensus_to_consensus": "10.140.0.3:5006"
+                "consensus_to_consensus": "10.146.0.3:5012"
             },
             "primary": {
-                "primary_to_primary": "10.140.0.3:5007",
-                "worker_to_primary": "10.140.0.3:5008"
+                "primary_to_primary": "10.146.0.3:5013",
+                "worker_to_primary": "10.146.0.3:5014"
             },
             "stake": 1,
             "workers": {
                 "0": {
-                    "primary_to_worker": "10.140.0.3:5009",
-                    "transactions": "10.140.0.3:5010",
-                    "worker_to_worker": "10.140.0.3:5011"
+                    "primary_to_worker": "10.146.0.3:5015",
+                    "transactions": "10.146.0.3:5016",
+                    "worker_to_worker": "10.146.0.3:5017"
                 }
             }
         },
-        "A0RUvoxEUATAR0qnPFKt76/cbCj2Xp/ZnuZv2oht9MA=": {
+        "Y2MWxDMCYSm08tg+otMpTmv46as9IJqCVpFABgcxaW8=": {
             "consensus": {
-                "consensus_to_consensus": "10.128.0.2:5012"
+                "consensus_to_consensus": "10.182.0.2:5006"
             },
             "primary": {
-                "primary_to_primary": "10.128.0.2:5013",
-                "worker_to_primary": "10.128.0.2:5014"
+                "primary_to_primary": "10.182.0.2:5007",
+                "worker_to_primary": "10.182.0.2:5008"
             },
             "stake": 1,
             "workers": {
                 "0": {
-                    "primary_to_worker": "10.128.0.2:5015",
-                    "transactions": "10.128.0.2:5016",
-                    "worker_to_worker": "10.128.0.2:5017"
+                    "primary_to_worker": "10.182.0.2:5009",
+                    "transactions": "10.182.0.2:5010",
+                    "worker_to_worker": "10.182.0.2:5011"
                 }
             }
         },
-        "CutRjQQRmKBHBQlDhQJjl1ei57lFo1qu4ye3ytgKR28=": {
+        "hPCBtTGEdD577Ap8t4Rp6WGorrIoUManMxWJ+SHJ+Uw=": {
             "consensus": {
-                "consensus_to_consensus": "10.182.0.2:5018"
+                "consensus_to_consensus": "10.128.0.2:5000"
             },
             "primary": {
-                "primary_to_primary": "10.182.0.2:5019",
-                "worker_to_primary": "10.182.0.2:5020"
+                "primary_to_primary": "10.128.0.2:5001",
+                "worker_to_primary": "10.128.0.2:5002"
             },
             "stake": 1,
             "workers": {
                 "0": {
-                    "primary_to_worker": "10.182.0.2:5021",
-                    "transactions": "10.182.0.2:5022",
-                    "worker_to_worker": "10.182.0.2:5023"
+                    "primary_to_worker": "10.128.0.2:5003",
+                    "transactions": "10.128.0.2:5004",
+                    "worker_to_worker": "10.128.0.2:5005"
                 }
             }
         },
-        "wGT89+X9sBwOcgpqoNZ9WlClTlcTwu7tiBcsZgGtCT8=": {
+        "vAWfpvc4b9gRO8OokoVAMsGXLIWRloPqO58wq4fOeYY=": {
             "consensus": {
-                "consensus_to_consensus": "10.146.0.3:5000"
+                "consensus_to_consensus": "10.140.0.3:5018"
             },
             "primary": {
-                "primary_to_primary": "10.146.0.3:5001",
-                "worker_to_primary": "10.146.0.3:5002"
+                "primary_to_primary": "10.140.0.3:5019",
+                "worker_to_primary": "10.140.0.3:5020"
             },
             "stake": 1,
             "workers": {
                 "0": {
-                    "primary_to_worker": "10.146.0.3:5003",
-                    "transactions": "10.146.0.3:5004",
-                    "worker_to_worker": "10.146.0.3:5005"
+                    "primary_to_worker": "10.140.0.3:5021",
+                    "transactions": "10.140.0.3:5022",
+                    "worker_to_worker": "10.140.0.3:5023"
                 }
             }
         }
