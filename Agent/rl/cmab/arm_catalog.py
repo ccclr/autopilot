@@ -59,8 +59,12 @@ class ArmCatalog:
         return list(self._arm_lookup.keys())
 
     def decode_arm(self, arm: Arm) -> dict[str, Any]:
-        if arm not in self._arm_lookup:
-            self._arm_lookup[arm] = self._decode_arm(arm)
-        values = self._arm_lookup[arm]
+        # Decoding an externally supplied configuration must not expand the
+        # legal catalog. In particular, the parameters file may contain a
+        # timeout outside the discrete grid; accelerator filtering later calls
+        # list_arms(), which must still return only the original legal arms.
+        values = self._arm_lookup.get(arm)
+        if values is None:
+            values = self._decode_arm(arm)
         return dict(zip(self._arm_keys, values))
 

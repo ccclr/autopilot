@@ -77,6 +77,20 @@ class CMABActionEncodingTests(unittest.TestCase):
         self.assertEqual(float(encoded.sum()), 1.0)
         self.assertEqual(float(encoded[40]), 1.0)
 
+    def test_decoding_external_arm_does_not_expand_discrete_catalog(self) -> None:
+        catalog = ArmCatalog(codec=ActionCodec(policy="rf_ts"))
+        original_arms = catalog.list_arms()
+        external_arm = (
+            "batch_size=100000,header_size=32,cut_condition_type=2,"
+            "fast_path_timeout=50,k=4"
+        )
+
+        decoded = catalog.decode_arm(external_arm)
+
+        self.assertEqual(decoded["fast_path_timeout"], 50)
+        self.assertEqual(catalog.list_arms(), original_arms)
+        self.assertNotIn(external_arm, catalog.list_arms())
+
     def test_recent_arm_matching_supports_one_hot_features(self) -> None:
         policy = self._policy("one_hot")
         policy.update([ARMS[1]], [1.0], contexts=[[0.1, 0.2]])
