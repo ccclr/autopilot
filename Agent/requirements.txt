@@ -8,3 +8,5 @@ scikit-learn
 xgboost
 joblib
 dm-tree
+google-cloud-compute
+boto3

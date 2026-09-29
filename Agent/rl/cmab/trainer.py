@@ -423,7 +423,19 @@ class CMABTrainer:
                 )
             return
         if hasattr(self.policy, "_arms"):
-            self.policy._arms = self.accelerator.filter_arms(self.arm_catalog.list_arms())
+            can_add_cap = (
+                hasattr(self.policy, "set_available_arms")
+                and getattr(self.policy, "action_encoding", None) == "numeric"
+                and not getattr(self.policy, "enable_cut_fpt_cross_feature", False)
+            )
+            arms = self.accelerator.filter_arms(
+                self.arm_catalog.list_arms(),
+                include_cap=can_add_cap,
+            )
+            if hasattr(self.policy, "set_available_arms"):
+                self.policy.set_available_arms(arms)
+            else:
+                self.policy._arms = arms
 
     def _metrics_files_by_epoch(self) -> list[tuple[int, Path]]:
         files: list[tuple[int, Path]] = []

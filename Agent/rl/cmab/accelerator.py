@@ -71,6 +71,23 @@ def _arm_timeout(arm: str) -> float:
     return 0.0
 
 
+def _with_arm_timeout(arm: str, timeout: float) -> str:
+    """Return the same arm with ``fast_path_timeout`` replaced."""
+    value = str(int(timeout)) if float(timeout).is_integer() else f"{float(timeout):g}"
+    parts = []
+    replaced = False
+    for part in arm.split(","):
+        key, sep, _old_value = part.partition("=")
+        if sep and key.strip() == _TIMEOUT_KEY:
+            parts.append(f"{key.strip()}={value}")
+            replaced = True
+        else:
+            parts.append(part)
+    if not replaced:
+        raise ValueError(f"Arm is missing {_TIMEOUT_KEY}: {arm}")
+    return ",".join(parts)
+
+
 def max_fast_path_delta_ms(matrix: np.ndarray) -> Optional[float]:
     """Smallest gap (ms) that lets every leader take the fast path.
 
@@ -239,8 +256,8 @@ class TrainingAccelerator:
             }
             fab.publish_accelerator_hint(hint, str(self.hint_path))
             logger.info("ACCELERATOR published %s", hint)
-        except Exception as e:
-            logger.warning("ACCELERATOR probe failed: %s", e)
+        except Exception:
+            logger.exception("ACCELERATOR probe failed")
         finally:
             os.chdir(cwd)
 
@@ -293,14 +310,26 @@ class TrainingAccelerator:
             return None
         return float(cap)
 
-    def filter_arms(self, arms: Iterable[str]) -> list[str]:
-        """Drop arms whose fast_path_timeout is strictly above the computed cap."""
+    def filter_arms(
+        self, arms: Iterable[str], include_cap: bool = True
+    ) -> list[str]:
+        """Keep timeouts up to the cap and add the computed cap itself.
+
+        The catalog may contain only coarse values such as 0/100/200/300. If
+        the measured cap is 38 ms, RF should explore both 0 and 38 rather than
+        collapsing the timeout dimension to only 0.
+        """
         arms = list(arms)
         cap = self.timeout_cap
         if cap is None:
             return arms
         timeouts = [_arm_timeout(a) for a in arms]
         kept = [a for a, t in zip(arms, timeouts) if t <= cap]
+        if include_cap and math.isfinite(cap):
+            # One synthetic cap arm per unique combination of the other
+            # parameters. dict preserves the catalog's deterministic order.
+            cap_arms = dict.fromkeys(_with_arm_timeout(arm, cap) for arm in arms)
+            kept.extend(arm for arm in cap_arms if arm not in kept)
         if not kept:
             smallest = min(timeouts)
             kept = [a for a, t in zip(arms, timeouts) if t == smallest]

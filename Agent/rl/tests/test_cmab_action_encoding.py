@@ -14,6 +14,7 @@ if str(RL_ROOT) not in sys.path:
     sys.path.insert(0, str(RL_ROOT))
 
 from actions.action_encode import ActionCodec
+from cmab.accelerator import TrainingAccelerator
 from cmab.arm_catalog import ArmCatalog
 from cmab.policy import CMABPolicy
 from cmab.trainer import CMABTrainer
@@ -90,6 +91,31 @@ class CMABActionEncodingTests(unittest.TestCase):
         self.assertEqual(decoded["fast_path_timeout"], 50)
         self.assertEqual(catalog.list_arms(), original_arms)
         self.assertNotIn(external_arm, catalog.list_arms())
+
+    def test_accelerator_adds_computed_timeout_to_rf_arms(self) -> None:
+        catalog = ArmCatalog(codec=ActionCodec(policy="rf_ts"))
+        accelerator = TrainingAccelerator()
+        accelerator._applied_cap = 38.0
+
+        arms = accelerator.filter_arms(catalog.list_arms())
+        timeouts = {
+            int(part.split("=", 1)[1])
+            for arm in arms
+            for part in arm.split(",")
+            if part.startswith("fast_path_timeout=")
+        }
+
+        self.assertEqual(timeouts, {0, 38})
+        self.assertEqual(len(arms), 48)
+
+    def test_numeric_rf_can_update_accelerator_generated_arm(self) -> None:
+        policy = self._policy("numeric")
+        generated = ARMS[0].replace("fast_path_timeout=0", "fast_path_timeout=38")
+        policy.set_available_arms([ARMS[0], generated])
+
+        policy.update([generated], [1.0], contexts=[[0.1, 0.2]])
+
+        self.assertEqual(policy.arm_counts[generated], 1)
 
     def test_recent_arm_matching_supports_one_hot_features(self) -> None:
         policy = self._policy("one_hot")

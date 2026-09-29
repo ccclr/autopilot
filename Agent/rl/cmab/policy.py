@@ -105,6 +105,28 @@ class CMABPolicy:
     def skips_learning(self) -> bool:
         return self.policy_name == "round_robin"
 
+    def set_available_arms(self, arms) -> None:
+        """Replace selectable arms while preserving RF bookkeeping.
+
+        Numeric RF supports accelerator-generated timeout arms that were not
+        present in the original discrete catalog. One-hot and fixed crossed
+        encodings cannot change dimension after training has started.
+        """
+        new_arms = list(arms)
+        if len(set(new_arms)) != len(new_arms):
+            raise ValueError("CMAB available arms must be unique")
+        unknown = [arm for arm in new_arms if arm not in self._arm_indices]
+        if unknown and (
+            self.action_encoding != "numeric" or self.enable_cut_fpt_cross_feature
+        ):
+            raise ValueError(
+                "Accelerator-generated timeout arms require numeric action "
+                "encoding without fixed Cut-FPT cross features"
+            )
+        self._arms = new_arms
+        for arm in new_arms:
+            self.arm_counts.setdefault(arm, 0)
+
     def set_round_robin_start_pos(self, start_pos: int) -> None:
         """Resume so epoch 0 selects shuffled_catalog[start_pos] on every node."""
         self._round_robin_pos_offset = int(start_pos)
