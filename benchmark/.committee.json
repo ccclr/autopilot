@@ -1,57 +1,6 @@
 {
     "authorities": {
-        "DKWvvDTpngA+opeIILRDSO1cl365YmJKH+44M4en0/s=": {
-            "consensus": {
-                "consensus_to_consensus": "10.182.0.2:5012"
-            },
-            "primary": {
-                "primary_to_primary": "10.182.0.2:5013",
-                "worker_to_primary": "10.182.0.2:5014"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.182.0.2:5015",
-                    "transactions": "10.182.0.2:5016",
-                    "worker_to_worker": "10.182.0.2:5017"
-                }
-            }
-        },
-        "Q+En3nZn9q7HCYB3x+bSHdjITPHKVzaaRC42rIDFOrk=": {
-            "consensus": {
-                "consensus_to_consensus": "10.128.0.2:5006"
-            },
-            "primary": {
-                "primary_to_primary": "10.128.0.2:5007",
-                "worker_to_primary": "10.128.0.2:5008"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.128.0.2:5009",
-                    "transactions": "10.128.0.2:5010",
-                    "worker_to_worker": "10.128.0.2:5011"
-                }
-            }
-        },
-        "aplQEScUOTeNq6DDwrw2P80c3mGWY62VIY8B9aNIDjU=": {
-            "consensus": {
-                "consensus_to_consensus": "10.146.0.3:5018"
-            },
-            "primary": {
-                "primary_to_primary": "10.146.0.3:5019",
-                "worker_to_primary": "10.146.0.3:5020"
-            },
-            "stake": 1,
-            "workers": {
-                "0": {
-                    "primary_to_worker": "10.146.0.3:5021",
-                    "transactions": "10.146.0.3:5022",
-                    "worker_to_worker": "10.146.0.3:5023"
-                }
-            }
-        },
-        "zhFPLdzUDna5K9+l68tXXbwBW4Q4xuQ8aMf2s/iIPnA=": {
+        "SbmyLt/FwV4hHxq7Z0zfAt/HBeXc3dBfpedkOrWskoM=": {
             "consensus": {
                 "consensus_to_consensus": "10.140.0.3:5000"
             },
@@ -65,6 +14,57 @@
                     "primary_to_worker": "10.140.0.3:5003",
                     "transactions": "10.140.0.3:5004",
                     "worker_to_worker": "10.140.0.3:5005"
+                }
+            }
+        },
+        "mBqKYmGStjHmzfbIz4ns3ISRbQxNCZlTzcl1bGFst+M=": {
+            "consensus": {
+                "consensus_to_consensus": "10.128.0.2:5018"
+            },
+            "primary": {
+                "primary_to_primary": "10.128.0.2:5019",
+                "worker_to_primary": "10.128.0.2:5020"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.128.0.2:5021",
+                    "transactions": "10.128.0.2:5022",
+                    "worker_to_worker": "10.128.0.2:5023"
+                }
+            }
+        },
+        "pxV1TiN41OHgRDA7b3bwlZdtp864suF2I7MZXdoqX/o=": {
+            "consensus": {
+                "consensus_to_consensus": "10.182.0.2:5006"
+            },
+            "primary": {
+                "primary_to_primary": "10.182.0.2:5007",
+                "worker_to_primary": "10.182.0.2:5008"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.182.0.2:5009",
+                    "transactions": "10.182.0.2:5010",
+                    "worker_to_worker": "10.182.0.2:5011"
+                }
+            }
+        },
+        "qNJ20Ky0MR8u3chH0GnR5RsSJAPEYDD6RCaLxyzoR7k=": {
+            "consensus": {
+                "consensus_to_consensus": "10.146.0.3:5012"
+            },
+            "primary": {
+                "primary_to_primary": "10.146.0.3:5013",
+                "worker_to_primary": "10.146.0.3:5014"
+            },
+            "stake": 1,
+            "workers": {
+                "0": {
+                    "primary_to_worker": "10.146.0.3:5015",
+                    "transactions": "10.146.0.3:5016",
+                    "worker_to_worker": "10.146.0.3:5017"
                 }
             }
         }

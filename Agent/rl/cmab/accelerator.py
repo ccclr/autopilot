@@ -7,11 +7,10 @@ Fast path needs every vote. After a leader has a quorum (2f+1) it still
 waits `fast_path_timeout` for the last vote.
   timeout >= Δ_i → leader i takes the fast path.
 Δ_i is that leader's gap from the quorum vote to the last vote.
-The RTT cap is ceil(max_i Δ_i) plus a 10 ms margin. Readiness delay can
-make the useful timeout larger than that cap, so discrete search keeps
-every catalog timeout up to the first grid value that is at least
-2 × cap. For caps of 33 ms and 62 ms on [0, 100, 200, 300], the retained
-timeouts are [0, 100] and [0, 100, 200].
+The RTT cap is ceil(max_i Δ_i) plus a 10 ms margin. Discrete search keeps
+every catalog timeout up to the first grid value that is at least that cap.
+For caps of 62 ms and 120 ms on [0, 100, 200, 300], the retained timeouts
+are [0, 100] and [0, 100, 200].
 
 The master is the replica that launched `fab remote`, not a fixed node
 index. It probes the ICMP RTT full matrix and publishes a hint
@@ -41,8 +40,8 @@ HINT_NAME = ".accelerator.json"
 APPLY_DELAY_EPOCHS = 5
 # Extra milliseconds above ceil(max Δ). Covers ping noise and a short RTT underestimate.
 TIMEOUT_CAP_MARGIN_MS = 10
-# Readiness delay can exceed the RTT gap, so the discrete bound is 2 × cap.
-TIMEOUT_GRID_SAFETY_FACTOR = 2
+# Discrete bound is the first catalog timeout at or above the raw RTT cap.
+TIMEOUT_GRID_SAFETY_FACTOR = 1
 
 
 def _remaining_dims(arms: Iterable[str]) -> dict[str, list[str]]:
@@ -81,7 +80,7 @@ def grid_timeout_upper_bound(
 ) -> Optional[float]:
     """Smallest catalog timeout that is at least ``factor × cap``.
 
-    Returns the largest catalog timeout when the doubled cap is above the grid.
+    Returns the largest catalog timeout when the cap is above the grid.
     """
     target = float(factor) * float(cap_ms)
     grid = sorted({float(timeout) for timeout in timeouts if math.isfinite(float(timeout))})
@@ -304,10 +303,10 @@ class TrainingAccelerator:
             return None
 
     def covering_timeout(self, timeouts: Iterable[float] | None = None) -> Optional[float]:
-        """Grid timeout that covers ``2 × cap``.
+        """First catalog timeout that is at least the raw cap.
 
-        With catalog values ``[0, 100, 200, 300]``, a 33 ms cap returns 100
-        and a 62 ms cap returns 200.
+        With catalog values ``[0, 100, 200, 300]``, a 62 ms cap returns 100
+        and a 120 ms cap returns 200.
         """
         cap = self.timeout_cap
         if cap is None:
@@ -317,7 +316,7 @@ class TrainingAccelerator:
         return grid_timeout_upper_bound(cap, timeouts)
 
     def filter_arms(self, arms: Iterable[str]) -> list[str]:
-        """Keep catalog arms whose timeout is at most the ``2 × cap`` grid bound."""
+        """Keep catalog arms whose timeout is at most the raw-cap grid bound."""
         arms = list(arms)
         cap = self.timeout_cap
         if cap is None:

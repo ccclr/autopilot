@@ -92,7 +92,7 @@ class CMABActionEncodingTests(unittest.TestCase):
         self.assertEqual(catalog.list_arms(), original_arms)
         self.assertNotIn(external_arm, catalog.list_arms())
 
-    def test_accelerator_keeps_first_grid_timeout_covering_twice_cap(self) -> None:
+    def test_accelerator_keeps_first_grid_timeout_covering_cap(self) -> None:
         catalog = ArmCatalog(codec=ActionCodec(policy="rf_ts"))
         original_arms = catalog.list_arms()
 
@@ -108,8 +108,8 @@ class CMABActionEncodingTests(unittest.TestCase):
             }
             return len(arms), timeouts
 
-        self.assertEqual(retained(33.0), (48, {0, 100}))
-        self.assertEqual(retained(62.0), (72, {0, 100, 200}))
+        self.assertEqual(retained(62.0), (48, {0, 100}))
+        self.assertEqual(retained(120.0), (72, {0, 100, 200}))
 
     def test_numeric_rf_can_update_accelerator_generated_arm(self) -> None:
         policy = self._policy("numeric")
