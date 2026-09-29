@@ -3,11 +3,14 @@ Training accelerator: prune the action space with golden rules.
 
 Fast-path timeout
 -----------------
-After a leader has 2f+1 votes it still waits Δ to gather 3f+1.
-  timeout ≥ Δ → fast path;  timeout < Δ → slow path.
-The smallest catalog timeout strictly above Δ is the covering value
-(e.g. cap=110 → 200). Timeouts larger than that covering value can be
-dropped; smaller ones are kept so a feasible fast path remains.
+Fast path needs every vote. After a leader has a quorum (2f+1) it still
+waits `fast_path_timeout` for the last vote.
+  timeout >= Δ_i → leader i takes the fast path.
+Δ_i is that leader's gap from the quorum vote to the last vote.
+The exploration upper bound is ceil(max_i Δ_i) plus a 10 ms margin, so a
+small RTT underestimate still leaves every leader on the fast path.
+Timeouts strictly above that bound are not explored. Smaller timeouts
+stay in the search space.
 
 Only the master (node 0) probes the ICMP RTT full matrix.
 It publishes a hint {timeout_cap, detect_epoch, apply_epoch} to every node.
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sys
 import threading
@@ -33,6 +37,8 @@ _TIMEOUT_KEY = "fast_path_timeout"
 _BENCH_DIR = Path(__file__).resolve().parents[3] / "benchmark"
 HINT_NAME = ".accelerator.json"
 APPLY_DELAY_EPOCHS = 5
+# Extra milliseconds above ceil(max Δ). Covers ping noise and a short RTT underestimate.
+TIMEOUT_CAP_MARGIN_MS = 10
 
 
 def _remaining_dims(arms: Iterable[str]) -> dict[str, list[str]]:
@@ -65,17 +71,20 @@ def _arm_timeout(arm: str) -> float:
 
 
 def max_fast_path_delta_ms(matrix: np.ndarray) -> Optional[float]:
-    """Δ_i = last vote - (2f+1)-th vote, using ICMP RTT (ms).
+    """Smallest gap (ms) that lets every leader take the fast path.
 
-    A vote arrives after propose-out + vote-back, so the delay is the ping RTT,
-    not RTT/2.
+    Δ_i = last vote − quorum vote, using ICMP RTT. A vote arrives after
+    propose-out + vote-back, so the delay is the ping RTT, not RTT/2.
+    The quorum is the same 2N/3+1 stake threshold as the protocol.
+    Returns None unless every leader has a finite RTT to every node.
     """
     matrix = np.asarray(matrix, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1] or matrix.shape[0] < 2:
         return None
     n = int(matrix.shape[0])
-    f = (n - 1) // 3
-    need = 3 * f + 1
+    # Same stake rule as Committee::quorum_threshold. If that quorum is
+    # already every node, the extra wait is 0.
+    quorum_index = min((2 * n) // 3 + 1, n) - 1
     deltas: list[float] = []
     for i in range(n):
         delays: list[float] = []
@@ -85,13 +94,19 @@ def max_fast_path_delta_ms(matrix: np.ndarray) -> Optional[float]:
                 delays.append(0.0)
             elif np.isfinite(rtt):
                 delays.append(float(rtt))
-        if len(delays) < need:
-            continue
+            else:
+                return None
         delays.sort()
-        deltas.append(delays[-1] - delays[2 * f])
-    if not deltas:
-        return None
+        deltas.append(delays[-1] - delays[quorum_index])
     return float(max(deltas))
+
+
+def fast_path_timeout_cap_ms(delta_ms: float, margin_ms: float = TIMEOUT_CAP_MARGIN_MS) -> float:
+    """Integer timeout that covers every leader, plus `margin_ms`.
+
+    110.2 ms becomes ceil(110.2) + 10 = 121.
+    """
+    return float(math.ceil(float(delta_ms)) + float(margin_ms))
 
 
 def _fabfile():
@@ -169,10 +184,11 @@ class TrainingAccelerator:
             os.chdir(_BENCH_DIR)
             fab = _fabfile()
             matrix = fab.collect_latency_matrix(quiet=True)
-            cap = max_fast_path_delta_ms(matrix)
-            if cap is None:
-                logger.warning("ACCELERATOR no valid Δ; skip publish")
+            delta_ms = max_fast_path_delta_ms(matrix)
+            if delta_ms is None:
+                logger.warning("ACCELERATOR no valid Δ for every leader; skip publish")
                 return
+            cap = fast_path_timeout_cap_ms(delta_ms)
             hint = {
                 "timeout_cap": cap,
                 "detect_epoch": detect_epoch,
@@ -222,27 +238,39 @@ class TrainingAccelerator:
         except (OSError, json.JSONDecodeError):
             return None
 
-    def covering_timeout(self, timeouts: Iterable[float]) -> Optional[float]:
-        """Smallest action timeout strictly larger than cap, or None if none exists."""
+    def covering_timeout(self, timeouts: Iterable[float] | None = None) -> Optional[float]:
+        """Exploration upper bound: the timeout that lets every leader fast-path.
+
+        ``timeouts`` is ignored. The bound is the probed cap itself, not the
+        next catalog entry above it.
+        """
+        del timeouts
         cap = self.timeout_cap
         if cap is None:
             return None
-        covering = sorted(t for t in set(float(x) for x in timeouts) if t > cap)
-        return covering[0] if covering else None
+        return float(cap)
 
     def filter_arms(self, arms: Iterable[str]) -> list[str]:
-        """Keep timeouts up to the first catalog value > cap; drop anything larger."""
+        """Drop arms whose fast_path_timeout is strictly above the computed cap."""
         arms = list(arms)
-        timeouts = [_arm_timeout(a) for a in arms]
-        limit = self.covering_timeout(timeouts)
-        if limit is None:
+        cap = self.timeout_cap
+        if cap is None:
             return arms
-        kept = [a for a, t in zip(arms, timeouts) if t <= limit]
+        timeouts = [_arm_timeout(a) for a in arms]
+        kept = [a for a, t in zip(arms, timeouts) if t <= cap]
+        if not kept:
+            smallest = min(timeouts)
+            kept = [a for a, t in zip(arms, timeouts) if t == smallest]
+            logger.warning(
+                "ACCELERATOR cap=%.1f is below every catalog timeout; "
+                "keeping smallest timeout %.1f",
+                cap,
+                smallest,
+            )
         if len(kept) < len(arms):
             logger.info(
-                "ACCELERATOR prune timeout_cap=%.1f limit=%.1f arms %d -> %d remaining=%s",
-                self.timeout_cap,
-                limit,
+                "ACCELERATOR prune timeout_cap=%.1f arms %d -> %d remaining=%s",
+                cap,
                 len(arms),
                 len(kept),
                 _remaining_dims(kept),

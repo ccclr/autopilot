@@ -203,7 +203,7 @@ def remote(
     cmab_action_encoding='numeric',
     duration=3600,
     rl_algo='cmab',
-    cmab_policy='round_robin',
+    cmab_policy='rf_ts',
     cmab_start_pos=0,
     start_controller=True,
 ):
@@ -327,20 +327,20 @@ def remote(
         # Keep well below epoch_slots so k-parallel slot skips still land.
         'applied_begin': 28,
         'use_fast_path': True,
-        'fast_path_timeout': 100,
+        'fast_path_timeout': 50,
         'use_ride_share': False,
         'car_timeout': 2000,
-        'cut_condition_type': 3,
+        'cut_condition_type': 2,
 
         'simulate_asynchrony': False,
         'asynchrony_type': [6],
 
         'asynchrony_start': [0],  # s
         'asynchrony_duration': [120],  # s
-        'affected_nodes': [4],
-        'asynchrony_nodes': [4],
-        'asynchrony_regions': [[zone]],
-        'egress_penalty': [[[0, 10]]],
+        'affected_nodes': [0],
+        'asynchrony_nodes': [0],
+        'asynchrony_regions': [[ ]],
+        'egress_penalty': [[ ]],
 
         'use_fast_sync': True,
         'use_exponential_timeouts': False,
@@ -563,12 +563,30 @@ def _ssh_connect_settings():
     return settings.username, pkey
 
 
-def _ping_rtt_ms(src_node, dst_ip, username, connect_kwargs, repeat=5, quiet=False):
-    """ICMP RTT (avg ms) from src_node to dst_ip via SSH + ping. Failures return nan."""
+def _rtt_mean_median(samples):
+    """Arithmetic mean and median of per-packet RTTs, in milliseconds."""
+    if not samples:
+        return np.nan, np.nan
+    values = np.asarray(samples, dtype=float)
+    return float(np.mean(values)), float(np.median(values))
+
+
+def _format_rtt(mean_ms, median_ms):
+    if not np.isfinite(mean_ms) or not np.isfinite(median_ms):
+        return "Failed"
+    return f"mean {mean_ms:.2f} ms, median {median_ms:.2f} ms"
+
+
+def _ping_rtt_stats(src_node, dst_ip, username, connect_kwargs, repeat=5, quiet=False):
+    """ICMP RTT mean and median (ms) from src_node to dst_ip.
+
+    Parses each `time=` sample from `ping` and summarizes those samples.
+    Same-host pairs return (0.0, 0.0). Failures return (nan, nan).
+    """
     import re
 
     if src_node["ip"] == dst_ip:
-        return 0.0
+        return 0.0, 0.0
     try:
         conn = Connection(
             host=src_node["ip"],
@@ -582,26 +600,27 @@ def _ping_rtt_ms(src_node, dst_ip, username, connect_kwargs, repeat=5, quiet=Fal
             timeout=max(30, repeat * 3),
         )
         conn.close()
-        m = re.search(
-            r'=\s*([\d\.]+)/([\d\.]+)/([\d\.]+)/',
-            result.stdout or '',
-        )
-        if not m:
+        samples = [
+            float(match)
+            for match in re.findall(r"time[=<]([\d.]+)\s*ms", result.stdout or "")
+        ]
+        if not samples:
             if not quiet:
-                print(f"[Error] ping {src_node['ip']} → {dst_ip}: no rtt stats")
-            return np.nan
-        return float(m.group(2))
+                print(f"[Error] ping {src_node['ip']} → {dst_ip}: no rtt samples")
+            return np.nan, np.nan
+        return _rtt_mean_median(samples)
     except Exception as e:
         if not quiet:
             print(f"[Error] ping {src_node['ip']} → {dst_ip}: {e}")
-        return np.nan
+        return np.nan, np.nan
 
 
-def collect_latency_matrix(repeat=5, quiet=False):
+def collect_latency_matrices(repeat=5, quiet=False):
     """
-    Full node-to-node ICMP RTT matrix in milliseconds.
+    Full node-to-node ICMP RTT matrices in milliseconds.
 
-    Shape (n, n): diagonal is 0.0, failed pings are nan.
+    Returns (mean_matrix, median_matrix). Each has shape (n, n): diagonal is
+    0.0, failed pings are nan. One ping run supplies both summaries.
     """
     username, pkey = _ssh_connect_settings()
     connect_kwargs = {"pkey": pkey}
@@ -610,13 +629,15 @@ def collect_latency_matrix(repeat=5, quiet=False):
         raise RuntimeError("Failed to read node info from fab/InstanceManager")
 
     n = len(node_records)
-    matrix = np.full((n, n), np.nan, dtype=float)
+    mean_matrix = np.full((n, n), np.nan, dtype=float)
+    median_matrix = np.full((n, n), np.nan, dtype=float)
     for i, src_node in enumerate(node_records):
         for j, dst_node in enumerate(node_records):
             if i == j:
-                matrix[i, j] = 0.0
+                mean_matrix[i, j] = 0.0
+                median_matrix[i, j] = 0.0
                 continue
-            matrix[i, j] = _ping_rtt_ms(
+            mean_ms, median_ms = _ping_rtt_stats(
                 src_node,
                 dst_node["ip"],
                 username,
@@ -624,7 +645,15 @@ def collect_latency_matrix(repeat=5, quiet=False):
                 repeat=repeat,
                 quiet=quiet,
             )
-    return matrix
+            mean_matrix[i, j] = mean_ms
+            median_matrix[i, j] = median_ms
+    return mean_matrix, median_matrix
+
+
+def collect_latency_matrix(repeat=5, quiet=False):
+    """Mean ICMP RTT matrix. Accelerator callers keep using this mean matrix."""
+    mean_matrix, _median_matrix = collect_latency_matrices(repeat=repeat, quiet=quiet)
+    return mean_matrix
 
 
 def publish_accelerator_hint(hint: dict, dest_path: str) -> None:
@@ -669,6 +698,7 @@ def latency(ctx, cross_region=False, source_node=None, full_matrix=True):
     Measure ICMP ping latency between nodes.
 
     SSHes into the source node and runs `ping` from there to each destination.
+    Each probe reports both the mean and the median of the per-packet RTTs.
 
     Args:
         cross_region: Whether to also measure cross-region latency (default: False)
@@ -735,7 +765,7 @@ def latency(ctx, cross_region=False, source_node=None, full_matrix=True):
     print(f"Will measure latency to {len(target_nodes)} other nodes")
 
     def ping_latency(src_node, dst_ip, repeat=5):
-        return _ping_rtt_ms(src_node, dst_ip, username, connect_kwargs, repeat=repeat)
+        return _ping_rtt_stats(src_node, dst_ip, username, connect_kwargs, repeat=repeat)
 
     if full_matrix:
         # Full matrix mode: measure all node pairs (fallback for compatibility)
@@ -760,32 +790,38 @@ def latency(ctx, cross_region=False, source_node=None, full_matrix=True):
         node_names = [node["name"] for node in all_nodes]
 
         print("=== Measuring Full Node-to-Node Latency Matrix (ICMP ping) ===")
-        full_latency_matrix = collect_latency_matrix()
+        full_latency_matrix, full_latency_median_matrix = collect_latency_matrices()
+        name_to_idx = {node["name"]: idx for idx, node in enumerate(all_nodes)}
         for i, src_node in enumerate(all_nodes):
             for j, dst_node in enumerate(all_nodes):
                 if i == j:
                     continue
-                latency = full_latency_matrix[i][j]
-                if not np.isnan(latency):
-                    print(f"  {src_node['name']} → {dst_node['name']}: {latency:.2f} ms")
-                else:
-                    print(f"  {src_node['name']} → {dst_node['name']}: Failed")
+                print(
+                    f"  {src_node['name']} → {dst_node['name']}: "
+                    f"{_format_rtt(full_latency_matrix[i][j], full_latency_median_matrix[i][j])}"
+                )
 
         # Region summaries and statistics for full matrix mode...
         print("\n=== Calculating Region Summaries ===")
         for i, (region, nodes) in enumerate(region_nodes):
             region_node_names = {node["name"] for node in nodes}
             region_indices = [idx for idx, node in enumerate(all_nodes) if node["name"] in region_node_names]
-            region_latencies = []
+            region_means = []
+            region_medians = []
             for j in region_indices:
                 for k in region_indices:
-                    if j != k and not np.isnan(full_latency_matrix[j][k]):
-                        region_latencies.append(full_latency_matrix[j][k])
+                    if j == k:
+                        continue
+                    if not np.isnan(full_latency_matrix[j][k]):
+                        region_means.append(full_latency_matrix[j][k])
+                    if not np.isnan(full_latency_median_matrix[j][k]):
+                        region_medians.append(full_latency_median_matrix[j][k])
 
-            if region_latencies:
-                avg_latency = np.mean(region_latencies)
+            if region_means:
+                avg_latency = np.mean(region_means)
                 region_matrix[i][i] = avg_latency
-                print(f"  [Average] {region}: {avg_latency:.2f} ms")
+                median_latency = np.median(region_medians) if region_medians else np.nan
+                print(f"  [Region] {region}: {_format_rtt(avg_latency, median_latency)}")
             else:
                 region_matrix[i][i] = np.nan
 
@@ -800,95 +836,124 @@ def latency(ctx, cross_region=False, source_node=None, full_matrix=True):
 
                     node_i = nodes_i[0]
                     node_j = nodes_j[0]
+                    src_idx = name_to_idx[node_i["name"]]
+                    dst_idx = name_to_idx[node_j["name"]]
+                    mean_ms = full_latency_matrix[src_idx][dst_idx]
+                    median_ms = full_latency_median_matrix[src_idx][dst_idx]
+                    region_matrix[i][j] = mean_ms
+                    print(f"[Cross] {region_i} → {region_j}: {_format_rtt(mean_ms, median_ms)}")
 
-                    latency = ping_latency(node_i, node_j["ip"])
-                    region_matrix[i][j] = latency
-
-                    if not np.isnan(latency):
-                        print(f"[Cross] {region_i} → {region_j}: {region_matrix[i][j]:.2f} ms")
-                    else:
-                        print(f"[Cross] {region_i} → {region_j}: Failed")
-
-        print(f"\n=== Full Node Latency Matrix (ms) ===")
+        print(f"\n=== Full Node Latency Matrix, mean (ms) ===")
         print("Nodes:", node_names)
         print(full_latency_matrix)
+        print(f"\n=== Full Node Latency Matrix, median (ms) ===")
+        print(full_latency_median_matrix)
 
         def full_matrix_stats(matrix):
             off_diagonal = [matrix[i][j] for i in range(len(matrix))
                           for j in range(len(matrix)) if i != j and not np.isnan(matrix[i][j])]
 
             if not off_diagonal:
-                return None, None, None, None
+                return None
 
-            mean_latency = np.mean(off_diagonal)
-            std_latency = np.std(off_diagonal)
-            min_latency = np.min(off_diagonal)
-            max_latency = np.max(off_diagonal)
+            return {
+                "mean": float(np.mean(off_diagonal)),
+                "median": float(np.median(off_diagonal)),
+                "std": float(np.std(off_diagonal)),
+                "min": float(np.min(off_diagonal)),
+                "max": float(np.max(off_diagonal)),
+            }
 
-            return mean_latency, std_latency, min_latency, max_latency
+        def print_matrix_stats(label, matrix):
+            stats = full_matrix_stats(matrix)
+            print(f"\n=== Full Matrix Statistics ({label}) ===")
+            if stats is None:
+                print("No valid measurements")
+                return
+            print(f"Mean Latency: {stats['mean']:.2f} ms")
+            print(f"Median Latency: {stats['median']:.2f} ms")
+            print(f"Std Deviation: {stats['std']:.2f} ms")
+            print(f"Min Latency: {stats['min']:.2f} ms")
+            print(f"Max Latency: {stats['max']:.2f} ms")
 
-        stats = full_matrix_stats(full_latency_matrix)
-        if stats[0] is not None:
-            mean_lat, std_lat, min_lat, max_lat = stats
-            print(f"\n=== Full Matrix Statistics ===")
-            print(f"Mean Latency: {mean_lat:.2f} ms")
-            print(f"Std Deviation: {std_lat:.2f} ms")
-            print(f"Min Latency: {min_lat:.2f} ms")
-            print(f"Max Latency: {max_lat:.2f} ms")
+        print_matrix_stats("per-link mean", full_latency_matrix)
+        print_matrix_stats("per-link median", full_latency_median_matrix)
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        np.save(f"latency_full_matrix_{timestamp}.npy", full_latency_matrix)
+        mean_path = f"latency_full_matrix_{timestamp}.npy"
+        median_path = f"latency_full_matrix_median_{timestamp}.npy"
+        np.save(mean_path, full_latency_matrix)
+        np.save(median_path, full_latency_median_matrix)
         print(f"\nResults saved to:")
-        print(f"  - latency_full_matrix_{timestamp}.npy")
+        print(f"  - {mean_path}")
+        print(f"  - {median_path}")
 
-    # Default behavior: measure latency vector from source node to all others
+    # Default behavior: measure latency vector from source node to all others.
+    # Reuse the full matrix when this source was already probed.
     print("=== Measuring Latency from Current Node (ICMP ping) ===")
-    latency_vector = []
+    source_idx = next(
+        (i for i, node in enumerate(node_records) if node["name"] == source_record["name"]),
+        None,
+    )
+    node_index = {node["name"]: i for i, node in enumerate(node_records)}
+    latency_means = []
+    latency_medians = []
     measured_count = 0
 
     for target in target_nodes:
         target_name = target["name"]
         target_ip = target["ip"]
         target_region = target["region"]
-        latency = ping_latency(source_record, target_ip)
-        latency_vector.append(latency)
-
-        if not np.isnan(latency):
-            print(f"  {source_node} ({source_record['region']}) → {target_name} ({target_region}): {latency:.2f} ms")
-            measured_count += 1
+        if full_matrix and source_idx is not None and target_name in node_index:
+            dst_idx = node_index[target_name]
+            mean_ms = full_latency_matrix[source_idx][dst_idx]
+            median_ms = full_latency_median_matrix[source_idx][dst_idx]
         else:
-            print(f"  {source_node} ({source_record['region']}) → {target_name} ({target_region}): Failed")
+            mean_ms, median_ms = ping_latency(source_record, target_ip)
+        latency_means.append(mean_ms)
+        latency_medians.append(median_ms)
+
+        print(
+            f"  {source_node} ({source_record['region']}) → {target_name} ({target_region}): "
+            f"{_format_rtt(mean_ms, median_ms)}"
+        )
+        if np.isfinite(mean_ms) and np.isfinite(median_ms):
+            measured_count += 1
 
     print(f"\nSuccessfully measured latency to {measured_count}/{len(target_nodes)} nodes")
 
-    # Calculate statistics
-    valid_latencies = [lat for lat in latency_vector if not np.isnan(lat)]
+    def print_vector_stats(label, values):
+        valid = [lat for lat in values if not np.isnan(lat)]
+        print(f"\n=== Latency Statistics ({label}) ===")
+        if not valid:
+            print("No valid measurements")
+            return
+        print(f"Mean Latency: {np.mean(valid):.2f} ms")
+        print(f"Median Latency: {np.median(valid):.2f} ms")
+        print(f"Std Deviation: {np.std(valid):.2f} ms")
+        print(f"Min Latency: {np.min(valid):.2f} ms")
+        print(f"Max Latency: {np.max(valid):.2f} ms")
+        print(f"Success Rate: {len(valid)}/{len(values)}")
 
-    if valid_latencies:
-        mean_lat = np.mean(valid_latencies)
-        std_lat = np.std(valid_latencies)
-        min_lat = np.min(valid_latencies)
-        max_lat = np.max(valid_latencies)
-
-        print("\n=== Latency Statistics ===")
-        print(f"Mean Latency: {mean_lat:.2f} ms")
-        print(f"Std Deviation: {std_lat:.2f} ms")
-        print(f"Min Latency: {min_lat:.2f} ms")
-        print(f"Max Latency: {max_lat:.2f} ms")
-        print(f"Success Rate: {len(valid_latencies)}/{len(latency_vector)}")
-    else:
-        print("\n=== No Valid Measurements ===")
+    print_vector_stats("per-link mean", latency_means)
+    print_vector_stats("per-link median", latency_medians)
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-    # Output the latency vector as JSON for easy parsing
+    def _json_latency(values):
+        return [float(x) if not np.isnan(x) else None for x in values]
+
+    # Output the latency vector as JSON for easy parsing.
+    # `latencies` stays the per-link mean so existing parsers keep working.
     import json
     output_data = {
         'source_node': source_node,
         'source_region': source_record['region'],
         'source_ip': current_node_ip,
         'target_nodes': [{'name': node['name'], 'region': node['region'], 'ip': node['ip']} for node in target_nodes],
-        'latencies': [float(x) if not np.isnan(x) else None for x in latency_vector],
+        'latencies': _json_latency(latency_means),
+        'latencies_mean': _json_latency(latency_means),
+        'latencies_median': _json_latency(latency_medians),
         'timestamp': timestamp
     }
 
@@ -898,8 +963,14 @@ def latency(ctx, cross_region=False, source_node=None, full_matrix=True):
     print("LATENCY_VECTOR_JSON_END")
 
     # Also save to file for debugging
-    np.save(f"latency_vector_{timestamp}.npy", np.array(latency_vector))
-    print(f"\nResults also saved to: latency_vector_{timestamp}.npy", file=sys.stderr)
+    mean_vector_path = f"latency_vector_{timestamp}.npy"
+    median_vector_path = f"latency_vector_median_{timestamp}.npy"
+    np.save(mean_vector_path, np.array(latency_means))
+    np.save(median_vector_path, np.array(latency_medians))
+    print(
+        f"\nResults also saved to: {mean_vector_path}, {median_vector_path}",
+        file=sys.stderr,
+    )
 
     return
 
