@@ -1,7 +1,7 @@
 {
     "key": {
         "name": "gcp",
-        "path": "/home/ccclr0302/.ssh/gcp_rsa"
+        "path": "/home/YOUR_USERNAME/.ssh/YOUR_PRIVATE_KEY"
     },
     "port": 5000,
     "repo": {
@@ -9,13 +9,13 @@
         "url": "git@github.com:ccclr/autopilot.git",
         "branch": "gcp"
     },
-    "project_id": "bright-meridian-486618-b3",
-    "username": "ccclr0302",
+    "project_id": "YOUR_PROJECT_ID",
+    "username": "YOUR_USERNAME",
     "instances": {
         "type": "t2d-standard-2",
         "regions": ["asia-east2-a"],
         "templates": [
-            "projects/just-creek-462112-j2/regions/asia-east1/instanceTemplates/autobahn-template-asia-east1"
+            "projects/YOUR_PROJECT_ID/regions/asia-east2/instanceTemplates/YOUR_TEMPLATE_NAME"
         ]
     }
 }

@@ -4,6 +4,9 @@ client
 results
 plots
 
+# Per-user experiment configuration
+/settings.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

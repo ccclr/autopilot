@@ -1,4 +1,29 @@
 # Running Benchmarks
+## GCP configuration
+
+For the `gcp` branch, create your own configuration from the shared template:
+
+```bash
+cd benchmark  # from the repository root
+cp settings.example.json settings.json
+```
+
+Edit `settings.json` with your GCP `project_id`, remote SSH `username`, and
+the absolute path to your RSA private key in `key.path` (do not use `~`).
+Set `instances.regions` to your GCP zones and `instances.templates` to the
+corresponding instance template paths, one per zone, if creating nodes with
+`fab create`. Keep `repo.branch` set to `gcp` for these experiments.
+
+`settings.json` is ignored by Git; each user keeps their own local configuration.
+The shared `settings.example.json` contains placeholders only. Back up an existing
+`settings.json` before pulling the change that removes it from Git tracking.
+
+Run `fab info` from this directory to check discovered nodes. The GCP runner
+discovers node internal IPs through the API using `project_id`; no IP list is
+needed in the configuration. The default remote experiment requires four nodes.
+
+The instructions below describe the inherited local and AWS workflows.
+
 This document explains how to benchmark the codebase and read benchmarks' results. It also provides a step-by-step tutorial to run benchmarks on [Amazon Web Services (AWS)](https://aws.amazon.com) accross multiple data centers (WAN).
 
 ## Local Benchmarks

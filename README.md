@@ -315,34 +315,24 @@ ssh-keygen -t rsa -f /home/username/.ssh/gcp_key -C username -b 2048
 
 #### Step 5: Configure GCP Settings
 
-Edit `benchmark/settings.json` (or copy from `settings-autopilot.json` if available):
+Copy the shared [configuration template](benchmark/settings.example.json) before editing:
 
-```json
-{
-  "key": {
-    "name": "gcp_key",
-    "path": "/home/username/.ssh/gcp_key",
-    "port": 5000
-  },
-  "repo": {
-    "name": "autopilot-repo",
-    "url": "https://github.com/ccclr/AutoPilot.git",
-    "branch": "main"
-  },
-  "project_id": "YOUR_PROJECT_ID",
-  "username": "your_username",
-  "instances": {
-    "type": "t2d-standard-4",
-    "regions": ["asia-east2-a", " us-central1-c", "us-central1-f"],
-    "templates": [
-      "projects/YOUR_PROJECT_ID/regions/us-east1/instanceTemplates/autopilot-template-asia-east2",
-      "projects/YOUR_PROJECT_ID/regions/us-east5/instanceTemplates/autopilot-template-us-central1-c",
-      "projects/YOUR_PROJECT_ID/regions/us-west1/instanceTemplates/autopilot-template-us-central1",
-      "projects/YOUR_PROJECT_ID/regions/us-west4/instanceTemplates/autopilot-template-us-central1"
-    ]
-  }
-}
+```bash
+cp benchmark/settings.example.json benchmark/settings.json
 ```
+
+`benchmark/settings.json` is ignored by Git so each user can keep their own
+experiment settings. If you already have this file, back it up before pulling
+the change that removes it from Git tracking, and do not overwrite it with the
+template unless you want to start a new configuration.
+
+Fill in `project_id`, the remote SSH `username`, and the absolute private key
+path in `key.path` (do not use `~`). Keep `port` at the top level and set
+`repo.branch` to `gcp`. For `fab create`, set `instances.regions` to your zones
+and provide one matching instance template path per zone in `instances.templates`.
+
+Run `fab info` from `benchmark/` to verify node discovery. The runner discovers
+internal IPs through the GCP API; the default remote experiment needs four nodes.
 
 **Find your project ID**:
 ```bash
