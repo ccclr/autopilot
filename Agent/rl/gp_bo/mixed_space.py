@@ -73,6 +73,7 @@ class MixedActionSpace:
             raise ValueError("fast_path_timeout_ms_bounds must be (lo, hi) with lo <= hi")
         # Search bound may be pruned; keep timeout_hi for feature normalization.
         self.timeout_search_hi = self.timeout_hi
+        self.timeout_search_lo = self.timeout_lo
 
         discrete_sets = [
             self.codec.batch_size_values,
@@ -100,9 +101,28 @@ class MixedActionSpace:
             np_clip(float(cap), self.timeout_lo, self.timeout_hi)
         )
 
+    def set_timeout_search_lo(self, bound: float | None) -> None:
+        # Emitted timeouts are integer milliseconds. Do not clamp an empty
+        # range back onto the excluded boundary.
+        self.timeout_search_lo = self.timeout_lo if bound is None else max(
+            self.timeout_lo, float(bound) + 1.0
+        )
+
+    @property
+    def timeout_search_empty(self) -> bool:
+        return self.timeout_search_lo > self.timeout_search_hi
+
+    def project_timeout(self, timeout_ms: float) -> float:
+        if self.timeout_search_lo == self.timeout_lo:
+            return float(timeout_ms)
+        return float(np_clip(timeout_ms, self.timeout_search_lo, self.timeout_search_hi))
+
     def make_arm(self, base: Tuple[int, int, int, int], timeout_ms: float) -> Arm:
+        if self.timeout_search_empty:
+            raise ValueError("No selectable timeout remains after RTT filtering")
         b, h, c, k = base
-        timeout = float(np_clip(timeout_ms, self.timeout_lo, self.timeout_search_hi))
+        timeout = float(np_clip(timeout_ms, self.timeout_search_lo, self.timeout_search_hi))
+        timeout = self.project_timeout(timeout)
         return encode_arm_values((b, h, c, timeout, k))
 
     def normalize_timeout(self, timeout_ms: float) -> float:
@@ -113,7 +133,7 @@ class MixedActionSpace:
 
     def denormalize_timeout(self, unit: float) -> float:
         u = float(np_clip(unit, 0.0, 1.0))
-        return self.timeout_lo + u * (self.timeout_search_hi - self.timeout_lo)
+        return self.timeout_search_lo + u * (self.timeout_search_hi - self.timeout_search_lo)
 
 
 def np_clip(x: float, lo: float, hi: float) -> float:

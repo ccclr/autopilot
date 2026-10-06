@@ -28,7 +28,8 @@ import os
 from invoke import Responder
 
 @task
-def local(ctx, debug=False, enable_accelerator=False, accelerator_period=100):
+def local(ctx, debug=False, enable_accelerator=False, accelerator_period=100,
+          enable_rtt_timeout_filter=False):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0, 
@@ -73,6 +74,7 @@ def local(ctx, debug=False, enable_accelerator=False, accelerator_period=100):
         # rf_ts: global RF. factorized / combined: dedicated reward models.
         'cmab_policy': 'rf_ts',
         'enable_accelerator': bool(enable_accelerator),
+        'enable_rtt_timeout_filter': bool(enable_rtt_timeout_filter),
         'accelerator_period': int(accelerator_period),
 
         # Unused
@@ -294,6 +296,8 @@ def remote(
         'cmab_policy': policy,
         'cmab_start_pos': start_pos,
         'enable_accelerator': False,
+        # Reverse accelerator: keep fast_path_timeout > the same covering grid bound.
+        'enable_rtt_timeout_filter': False,
         'accelerator_period': 10,
 
         # Unused

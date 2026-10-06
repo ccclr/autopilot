@@ -1,6 +1,10 @@
 """
 Training accelerator: prune the action space with golden rules.
 
+The independent RTT timeout filter reverses the upper-cap rule: it keeps
+catalog timeouts strictly above the same covering grid value. Either rule can
+be enabled separately; both together trigger the zero-timeout fallback.
+
 Fast-path timeout
 -----------------
 Fast path needs every vote. After a leader has a quorum (2f+1) it still
@@ -71,6 +75,18 @@ def _arm_timeout(arm: str) -> float:
             except ValueError:
                 return 0.0
     return 0.0
+
+
+def zero_timeout_arms(arms: Iterable[str]) -> list[str]:
+    """Preserve other parameters and deduplicate zero-timeout fallback arms."""
+    result = []
+    for arm in arms:
+        parts = [
+            "fast_path_timeout=0" if part.partition("=")[0].strip() == _TIMEOUT_KEY else part
+            for part in arm.split(",")
+        ]
+        result.append(",".join(parts))
+    return list(dict.fromkeys(result))
 
 
 def grid_timeout_upper_bound(
@@ -190,7 +206,11 @@ class TrainingAccelerator:
         apply_delay: int = APPLY_DELAY_EPOCHS,
         is_master: bool = False,
         hint_path: Optional[str | Path] = None,
+        enable_timeout_cap: bool = True,
+        enable_rtt_timeout_filter: bool = False,
     ):
+        self.enable_timeout_cap = bool(enable_timeout_cap)
+        self.enable_rtt_timeout_filter = bool(enable_rtt_timeout_filter)
         self.period = max(1, int(period))
         self.apply_delay = max(1, int(apply_delay))
         self.is_master = bool(is_master)
@@ -315,7 +335,7 @@ class TrainingAccelerator:
             return float(TIMEOUT_GRID_SAFETY_FACTOR) * float(cap)
         return grid_timeout_upper_bound(cap, timeouts)
 
-    def filter_arms(self, arms: Iterable[str]) -> list[str]:
+    def _filter_timeout_cap(self, arms: Iterable[str]) -> list[str]:
         """Keep catalog arms whose timeout is at most the raw-cap grid bound."""
         arms = list(arms)
         cap = self.timeout_cap
@@ -345,4 +365,29 @@ class TrainingAccelerator:
                 len(kept),
                 _remaining_dims(kept),
             )
+        return kept
+
+    def filter_arms(self, arms: Iterable[str]) -> list[str]:
+        """Keep <= grid bound for accelerator, > bound for the reverse filter."""
+        original = list(arms)
+        kept = self._filter_timeout_cap(original) if self.enable_timeout_cap else original
+        if self.enable_rtt_timeout_filter:
+            # Calculate from the full catalog so both switches share a boundary.
+            limit = self.covering_timeout(_arm_timeout(a) for a in original)
+            if limit is not None:
+                filtered = [a for a in kept if _arm_timeout(a) > limit]
+                if len(filtered) != len(kept):
+                    logger.info(
+                        "RTT_TIMEOUT_FILTER grid_lo=%.1f arms %d -> %d remaining=%s",
+                        limit, len(kept), len(filtered), _remaining_dims(filtered),
+                    )
+                if not filtered and original:
+                    filtered = [a for a in original if _arm_timeout(a) == 0.0]
+                    if not filtered:
+                        filtered = zero_timeout_arms(original)
+                    logger.warning(
+                        "RTT_TIMEOUT_FILTER no candidates remain; falling back to "
+                        "fast_path_timeout=0 (%d arms)", len(filtered),
+                    )
+                kept = filtered
         return kept

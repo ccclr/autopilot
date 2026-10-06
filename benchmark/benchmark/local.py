@@ -228,6 +228,7 @@ class LocalBench:
             )
             cmab_seed = getattr(self.bench_parameters, 'cmab_seed', 0)
             warmup_iterations = getattr(self.bench_parameters, 'rl_warmup_iterations', 5)
+            enable_rtt_timeout_filter = getattr(self.bench_parameters, 'enable_rtt_timeout_filter', False)
             enable_accelerator = getattr(self.bench_parameters, 'enable_accelerator', False)
             accelerator_period = getattr(self.bench_parameters, 'accelerator_period', 100)
             cmab_policy = getattr(self.bench_parameters, 'cmab_policy', 'rf_ts')
@@ -239,6 +240,7 @@ class LocalBench:
             Print.info(f'RL warmup iterations: {warmup_iterations}')
             Print.info(f'CMAB policy: {cmab_policy}')
             Print.info(f'CMAB start pos: {cmab_start_pos}')
+            Print.info(f'RL RTT timeout filter: enabled={enable_rtt_timeout_filter} (keep timeout > covering grid bound)')
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
             if resume_from:
                 Print.info(f'RL resume-from: {resume_from}')
@@ -270,6 +272,7 @@ class LocalBench:
                     cmab_seed=cmab_seed,
                     warmup_iterations=warmup_iterations,
                     enable_accelerator=enable_accelerator,
+                    enable_rtt_timeout_filter=enable_rtt_timeout_filter,
                     accelerator_period=accelerator_period,
                     cmab_policy=(cmab_policy if rl_algo == 'cmab' else None),
                     cmab_start_pos=(cmab_start_pos if rl_algo == 'cmab' else None),

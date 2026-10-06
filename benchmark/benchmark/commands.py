@@ -316,6 +316,7 @@ class CommandMaker:
         cmab_environment_label=None,
         cmab_transition_run_id=None,
         metrics_dir=None,
+        enable_rtt_timeout_filter=False,
     ):
         """Generate command to run controller as a background process"""
         controller_path = join(CommandMaker.HOME, repo_name, 'Agent/rl/controllers/controller.py')
@@ -339,6 +340,8 @@ class CommandMaker:
             cmd += f' --resume-from {resume_from}'
         if warmup_iterations is not None:
             cmd += f' --warmup-iterations {int(warmup_iterations)}'
+        if enable_rtt_timeout_filter:
+            cmd += " --enable-rtt-timeout-filter"
         if enable_accelerator:
             cmd += ' --enable-accelerator'
         if accelerator_master is True:

@@ -261,3 +261,49 @@ plot_params = {
 The first graph ('latency') plots the latency versus the throughput. It shows that the latency is low until a fairly neat threshold after which it drastically increases. Determining this threshold is crucial to understand the limits of the system. 
 
 Another challenge is comparing apples-to-apples between different deployments of the system. The challenge here is again that latency and throughput are interdependent, as a result a throughput/number of nodes chart could be tricky to produce fairly. The way to do it is to define a maximum latency and measure the throughput at this point instead of simply pushing every system to its peak throughput (where latency is meaningless). The second graph ('tps') plots the maximum achievable throughput under a maximum latency for different numbers of nodes.
+
+### RTT-based timeout filtering
+
+`enable_rtt_timeout_filter` in `fabfile.py` defaults to `False`. It reverses the
+existing accelerator: keep `fast_path_timeout` values **strictly above** the same
+covering grid bound, removing the boundary and smaller values. The shared RTT probe calculates
+`cap = ceil(max leader Δ) + 10 ms`, where Δ is the estimated gap from the quorum
+vote to the last vote. The bound is the first catalog timeout at least as large
+as the cap, or the largest catalog timeout if the cap exceeds the grid.
+
+```python
+'enable_accelerator': False,
+'enable_rtt_timeout_filter': True,
+'accelerator_period': 10,
+```
+
+For cap = 120 ms and catalog `[0, 100, 200, 300]`, the bound is 200 ms:
+
+| Switches enabled | Retained timeouts (ms) |
+| --- | --- |
+| Neither | 0, 100, 200, 300 |
+| Accelerator only | 0, 100, 200 |
+| RTT timeout filter only | 300 |
+| Both | 0 (fallback) |
+
+Both switches share the mean ICMP RTT matrix probe and `.accelerator.json` hint.
+Each node applies the cap at `detect_epoch + 5` or the next processed epoch.
+Failed probes publish no update; without a valid cap, candidates remain unchanged.
+A later probe can restore excluded candidates. Once a valid cap takes effect, the two switches are exact complements:
+accelerator keeps `timeout <= bound`, the reverse filter keeps `timeout > bound`.
+The reverse filter can remove all actions by itself when the bound is the largest
+timeout; enabling both also removes all actions before fallback. Whenever this
+happens, the trainer falls back to `fast_path_timeout=0`, keeps other action
+parameters selectable, logs a warning and continues training. No excluded
+nonzero timeout is restored. Later probes can restore the normal candidate range.
+
+CMAB and XGBoost update selectable catalog arms while preserving the original
+catalog and training history. When the new switch is enabled, zero-timeout
+fallback arms are reserved before initializing the models, including for sampled
+or default-only catalogs; their number may exceed the requested `max_arms` sample. GP-BO and KernelUCB use `bound + 1 ms` as their search lower bound because emitted timeouts are integer
+milliseconds; the accelerator separately sets their upper bound. Enabling both
+makes this range empty before fallback; an empty range is reset to `[0, 0]`. DQN does not support this switch.
+
+Trainer/controller command lines accept `--enable-rtt-timeout-filter`. Local
+benchmarks accept `fab local --enable-rtt-timeout-filter`; probing uses the
+configured benchmark node inventory, as the original accelerator does.

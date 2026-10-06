@@ -89,6 +89,8 @@ def main():
     parser.add_argument("--transition-export-dir", default=None)
     parser.add_argument("--environment-label", default="unlabeled")
     parser.add_argument("--run-id", default=None)
+    parser.add_argument("--enable-rtt-timeout-filter", action="store_true",
+                        help="Keep fast_path_timeout strictly above the RTT covering grid bound.")
     args = parser.parse_args()
     if args.enable_cut_fpt_cross_feature and args.policy in ("factorized", "combined"):
         parser.error("Cut-FPT cross features apply to the standard CMAB policy; choose rf_ts")
@@ -107,7 +109,8 @@ def main():
     )
 
     codec = ActionCodec(policy=args.policy)
-    arm_catalog = ArmCatalog(codec=codec, max_arms=args.max_arms, seed=args.seed)
+    arm_catalog = ArmCatalog(codec=codec, max_arms=args.max_arms, seed=args.seed,
+                             reserve_zero_timeout=args.enable_rtt_timeout_filter)
     arms = arm_catalog.list_arms()
     feature_dim = len(arm_catalog.decode_arm(arms[0])) if arms else 0
     if args.policy == "factorized":
@@ -195,6 +198,7 @@ def main():
         node_index=args.node_index,
         warmup_iterations=warmup_iterations,
         enable_accelerator=args.enable_accelerator,
+        enable_rtt_timeout_filter=args.enable_rtt_timeout_filter,
         accelerator_period=args.accelerator_period,
         accelerator_master=args.accelerator_master,
         transition_writer=transition_writer,

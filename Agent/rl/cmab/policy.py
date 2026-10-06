@@ -123,6 +123,9 @@ class CMABPolicy:
                 "Accelerator-generated timeout arms require numeric action "
                 "encoding without fixed Cut-FPT cross features"
             )
+        if self.policy_name == "round_robin" and new_arms != self._arms:
+            self._round_robin_order = list(range(len(new_arms)))
+            random.Random(self._random_state).shuffle(self._round_robin_order)
         self._arms = new_arms
         for arm in new_arms:
             self.arm_counts.setdefault(arm, 0)

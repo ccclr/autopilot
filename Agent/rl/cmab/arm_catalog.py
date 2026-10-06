@@ -10,7 +10,7 @@ Arm = str
 
 
 class ArmCatalog:
-    def __init__(self, codec: ActionCodec | None = None, max_arms: int | None = None, seed: int = 0):
+    def __init__(self, codec: ActionCodec | None = None, max_arms: int | None = None, seed: int = 0, reserve_zero_timeout: bool = False):
         self.codec = codec or ActionCodec()
         self.action_dims = list(self.codec.action_dims)
         self._arm_keys = [
@@ -32,6 +32,16 @@ class ArmCatalog:
             # self._use_optimistic_tips_arm_values,
         ]
         self._arms = self._build_arms(max_arms=max_arms, seed=seed)
+        if reserve_zero_timeout:
+            # Reserve fallback features before fixed action encodings/models
+            # are initialized, including sampled and default-only catalogs.
+            existing = {arm_id for arm_id, _ in self._arms}
+            for _, values in list(self._arms):
+                zero_values = (*values[:3], 0, *values[4:])
+                zero_arm = self._encode_arm(zero_values)
+                if zero_arm not in existing:
+                    self._arms.append((zero_arm, zero_values))
+                    existing.add(zero_arm)
         self._arm_lookup = {arm_id: arm_tuple for arm_id, arm_tuple in self._arms}
 
     def _build_arms(self, max_arms: int | None, seed: int) -> List[Tuple[Arm, Tuple[int, ...]]]:

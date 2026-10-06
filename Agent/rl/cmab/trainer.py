@@ -43,6 +43,7 @@ class CMABTrainer:
         accelerator_master: Optional[bool] = None,
         transition_writer: Optional[AsyncTransitionDatasetWriter] = None,
         latest_checkpoint_path: Optional[str] = None,
+        enable_rtt_timeout_filter: bool = False,
     ):
         self.metrics_dir = Path(metrics_dir)
         self.parameters_file = Path(parameters_file)
@@ -66,7 +67,7 @@ class CMABTrainer:
         self.latest_checkpoint_path = Path(latest_checkpoint_path) if latest_checkpoint_path else None
         if accelerator is not None:
             self.accelerator = accelerator
-        elif enable_accelerator:
+        elif enable_accelerator or enable_rtt_timeout_filter:
             hint_path = self.parameters_file.parent / ".accelerator.json"
             if accelerator_master is None:
                 accelerator_master = self.node_index == 0
@@ -74,6 +75,8 @@ class CMABTrainer:
                 period=accelerator_period,
                 is_master=bool(accelerator_master),
                 hint_path=hint_path,
+                enable_timeout_cap=enable_accelerator,
+                enable_rtt_timeout_filter=enable_rtt_timeout_filter,
             )
         else:
             self.accelerator = None
@@ -135,7 +138,18 @@ class CMABTrainer:
                 current_epoch = self._get_epoch_from_metrics_file(self.last_metrics_file)
                 if self.accelerator is not None:
                     self.accelerator.on_epoch(current_epoch)
-                    self._apply_accelerator()
+                    if not self._apply_accelerator():
+                        logger.warning(
+                            "RTT_TIMEOUT_FILTER no selectable actions at epoch=%s; "
+                            "pausing action selection and learning until candidates return",
+                            current_epoch,
+                        )
+                        next_metrics = self._wait_for_new_metrics_file(
+                            self.last_metrics_file, timeout=self.metrics_timeout
+                        )
+                        if next_metrics is not None:
+                            self.last_metrics_file = next_metrics
+                        continue
                 shared_seed_hex = self._compute_shared_seed_hex(self.last_metrics_file)
                 arm = self.policy.select_arm(
                     context,
@@ -399,17 +413,28 @@ class CMABTrainer:
                 "Failed to close CMAB transition writer; CMAB will continue"
             )
 
-    def _apply_accelerator(self) -> None:
+    def _apply_accelerator(self) -> bool:
+        """Update candidates and report whether any action is selectable."""
         if self.accelerator is None:
-            return
+            return True
         mixed = getattr(self.policy, "mixed_space", None)
         if mixed is not None:
             vals = list(getattr(mixed.codec, "fast_path_timeout_ms_values", []))
             vals.append(mixed.timeout_hi)
             prev_hi = mixed.timeout_search_hi
+            prev_lo = mixed.timeout_search_lo
             limit = self.accelerator.covering_timeout(vals)
-            mixed.set_timeout_search_hi(limit)
-            if limit is not None and mixed.timeout_search_hi != prev_hi:
+            mixed.set_timeout_search_hi(limit if self.accelerator.enable_timeout_cap else None)
+            mixed.set_timeout_search_lo(
+                limit if self.accelerator.enable_rtt_timeout_filter else None
+            )
+            if mixed.timeout_search_empty:
+                logger.warning(
+                    "RTT_TIMEOUT_FILTER no continuous timeouts remain; "
+                    "falling back to fast_path_timeout=0"
+                )
+                mixed.timeout_search_lo = mixed.timeout_search_hi = 0.0
+            if (mixed.timeout_search_lo, mixed.timeout_search_hi) != (prev_lo, prev_hi):
                 codec = mixed.codec
                 logger.info(
                     "ACCELERATOR remaining dims %s",
@@ -417,17 +442,19 @@ class CMABTrainer:
                         "batch_size": list(codec.batch_size_values),
                         "header_size": list(codec.header_size_values),
                         "cut_condition_type": list(codec.cut_condition_type_values),
-                        "fast_path_timeout": [mixed.timeout_lo, mixed.timeout_search_hi],
+                        "fast_path_timeout": [mixed.timeout_search_lo, mixed.timeout_search_hi],
                         "k": list(codec.parallel_proposals_values),
                     },
                 )
-            return
+            return not mixed.timeout_search_empty
         if hasattr(self.policy, "_arms"):
             arms = self.accelerator.filter_arms(self.arm_catalog.list_arms())
             if hasattr(self.policy, "set_available_arms"):
                 self.policy.set_available_arms(arms)
             else:
                 self.policy._arms = arms
+            return bool(arms)
+        return True
 
     def _metrics_files_by_epoch(self) -> list[tuple[int, Path]]:
         files: list[tuple[int, Path]] = []

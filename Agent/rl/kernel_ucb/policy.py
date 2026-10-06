@@ -143,6 +143,7 @@ class KernelUCBPolicy:
         self, context, base: tuple[int, int, int, int], timeout_ms: float
     ) -> np.ndarray:
         b, h, c, k = base
+        timeout_ms = self.mixed_space.project_timeout(timeout_ms)
         arm_vec = np.asarray([b, h, c, float(timeout_ms), k], dtype=np.float64)
         arm_n = self._normalize_action_vector(arm_vec)
         if self._uses_context and context is not None:
@@ -200,7 +201,7 @@ class KernelUCBPolicy:
     def _maximize_ucb_timeout(
         self, context, base, shared_seed_hex: str | None
     ) -> tuple[float, float, float, float, str]:
-        lo = self.mixed_space.timeout_lo
+        lo = self.mixed_space.timeout_search_lo
         hi = self.mixed_space.timeout_search_hi
         if hi <= lo:
             ucb, mean, std, arm = self._ucb_at_timeout(context, base, lo)

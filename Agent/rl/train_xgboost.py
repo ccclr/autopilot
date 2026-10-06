@@ -74,6 +74,8 @@ def main():
         default=None,
         help="This process is the fab-remote host and runs latency probes.",
     )
+    parser.add_argument("--enable-rtt-timeout-filter", action="store_true",
+                        help="Keep fast_path_timeout strictly above the RTT covering grid bound.")
     args = parser.parse_args()
 
     warmup_iterations = max(0, int(args.warmup_iterations))
@@ -90,7 +92,8 @@ def main():
 
     codec_policy = "default" if args.policy == "default" else "rf_ts"
     codec = ActionCodec(policy=codec_policy)
-    arm_catalog = ArmCatalog(codec=codec, max_arms=args.max_arms, seed=args.seed)
+    arm_catalog = ArmCatalog(codec=codec, max_arms=args.max_arms, seed=args.seed,
+                             reserve_zero_timeout=args.enable_rtt_timeout_filter)
     arms = arm_catalog.list_arms()
     feature_dim = len(arm_catalog.decode_arm(arms[0])) if arms else 0
     policy = XGBoostPolicy(
@@ -121,6 +124,7 @@ def main():
         warmup_iterations=warmup_iterations,
         checkpoint_prefix="xgboost_checkpoint",
         enable_accelerator=args.enable_accelerator,
+        enable_rtt_timeout_filter=args.enable_rtt_timeout_filter,
         accelerator_period=args.accelerator_period,
         accelerator_master=args.accelerator_master,
     )

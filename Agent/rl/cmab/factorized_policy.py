@@ -160,6 +160,19 @@ class FactorizedCMABPolicy(CMABPolicy):
             return _one_hot(value, self._factor_catalogs[key])
         return np.asarray([float(value)], dtype=np.float32)
 
+    def set_available_arms(self, arms) -> None:
+        new_arms = list(arms)
+        changed = new_arms != self._arms
+        super().set_available_arms(new_arms)
+        if changed:
+            # Keep the original factor vocabulary and model feature dimensions.
+            if new_arms:
+                self._cache_arm_feature_blocks()
+            else:
+                self._arm_factors = []
+                self._main_factor_mat = {key: matrix[:0] for key, matrix in self._main_factor_mat.items()}
+                self._pair_factor_mat = {key: matrix[:0] for key, matrix in self._pair_factor_mat.items()}
+
     def _cache_arm_feature_blocks(self) -> None:
         self._arm_factors = [parse_arm_factors(arm) for arm in self._arms]
         self._main_factor_mat = {

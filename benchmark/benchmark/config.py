@@ -487,6 +487,13 @@ class BenchParameters:
             else:
                 self.enable_accelerator = bool(enable_acc)
 
+            enable_rtt = json.get('enable_rtt_timeout_filter', False)
+            self.enable_rtt_timeout_filter = enable_rtt not in (
+                None, '', False, 0, '0', 'false', 'False'
+            )
+            if self.enable_rtt_timeout_filter and self.rl_algo == 'dqn':
+                raise ConfigError('enable_rtt_timeout_filter is not supported by DQN')
+
             cmab_policy = json.get('cmab_policy', 'rf_ts')
             if cmab_policy in (None, ''):
                 cmab_policy = 'rf_ts'

@@ -133,6 +133,7 @@ class AutopilotController:
         cmab_environment_label: str = "unlabeled",
         cmab_transition_run_id: Optional[str] = None,
         enable_cmab_cut_fpt_cross_feature: bool = False,
+        enable_rtt_timeout_filter: bool = False,
     ):
         """
         Initialize controller
@@ -170,6 +171,9 @@ class AutopilotController:
         if self.cmab_seed < 0:
             raise ValueError("CMAB seed must be an integer >= 0")
         self.warmup_iterations = max(0, int(warmup_iterations))
+        self.enable_rtt_timeout_filter = bool(enable_rtt_timeout_filter)
+        if self.enable_rtt_timeout_filter and self.rl_algo == "dqn":
+            raise ValueError("enable_rtt_timeout_filter is not supported by DQN")
         self.enable_accelerator = bool(enable_accelerator)
         self.accelerator_period = max(1, int(accelerator_period))
         self.accelerator_master = accelerator_master
@@ -317,6 +321,8 @@ class AutopilotController:
             ]
             if self.rl_algo != "dqn":
                 cmd.extend(["--accelerator-period", str(self.accelerator_period)])
+            if self.enable_rtt_timeout_filter:
+                cmd.append("--enable-rtt-timeout-filter")
             if self.enable_accelerator and self.rl_algo != "dqn":
                 cmd.append("--enable-accelerator")
             if self.accelerator_master is True:
@@ -551,6 +557,8 @@ def main():
         help='Epochs between master latency probes (apply 5 epochs later)',
     )
 
+    parser.add_argument("--enable-rtt-timeout-filter", action="store_true",
+                        help="Keep fast_path_timeout strictly above the RTT covering grid bound")
     parser.add_argument("--max-training-iterations", type=int, default=None)
     parser.add_argument("--enable-cmab-cut-fpt-cross-feature", action="store_true")
     parser.add_argument('--dqn-action-endpoints', type=str, default=None)
@@ -612,6 +620,7 @@ def main():
             cmab_seed=args.cmab_seed,
             warmup_iterations=args.warmup_iterations,
             enable_accelerator=args.enable_accelerator,
+            enable_rtt_timeout_filter=args.enable_rtt_timeout_filter,
             accelerator_period=args.accelerator_period,
             accelerator_master=args.accelerator_master,
             cmab_policy=args.policy,

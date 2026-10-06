@@ -75,6 +75,8 @@ def main():
         default=None,
         help="This process is the fab-remote host and runs latency probes.",
     )
+    parser.add_argument("--enable-rtt-timeout-filter", action="store_true",
+                        help="Keep fast_path_timeout strictly above the RTT covering grid bound.")
     args = parser.parse_args()
 
     beta = float(args.beta if args.kappa is None else args.kappa)
@@ -139,6 +141,7 @@ def main():
         warmup_iterations=0,
         checkpoint_prefix="kernel_ucb_checkpoint",
         enable_accelerator=args.enable_accelerator,
+        enable_rtt_timeout_filter=args.enable_rtt_timeout_filter,
         accelerator_period=args.accelerator_period,
         accelerator_master=args.accelerator_master,
     )

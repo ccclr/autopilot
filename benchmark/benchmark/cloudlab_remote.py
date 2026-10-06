@@ -589,6 +589,7 @@ class CloudLabBench:
             )
             cmab_seed = getattr(bench_parameters, 'cmab_seed', 0)
             warmup_iterations = getattr(bench_parameters, 'rl_warmup_iterations', 5)
+            enable_rtt_timeout_filter = getattr(bench_parameters, 'enable_rtt_timeout_filter', False)
             enable_accelerator = getattr(bench_parameters, 'enable_accelerator', False)
             accelerator_period = getattr(bench_parameters, 'accelerator_period', 100)
             cmab_policy = getattr(bench_parameters, 'cmab_policy', 'rf_ts')
@@ -600,9 +601,10 @@ class CloudLabBench:
             Print.info(f'RL warmup iterations: {warmup_iterations}')
             Print.info(f'CMAB policy: {cmab_policy}')
             Print.info(f'CMAB start pos: {cmab_start_pos}')
+            Print.info(f'RL RTT timeout filter: enabled={enable_rtt_timeout_filter} (keep timeout > covering grid bound)')
             Print.info(f'RL accelerator: enabled={enable_accelerator} period={accelerator_period} epochs')
             master_index = None
-            if enable_accelerator:
+            if enable_accelerator or enable_rtt_timeout_filter:
                 local_ips = launcher_ips()
                 master_index = next(
                     (i for i, address in enumerate(primary_addresses)
@@ -650,6 +652,7 @@ class CloudLabBench:
                     cmab_seed=cmab_seed,
                     warmup_iterations=warmup_iterations,
                     enable_accelerator=enable_accelerator,
+                    enable_rtt_timeout_filter=enable_rtt_timeout_filter,
                     accelerator_period=accelerator_period,
                     accelerator_master=(
                         (i == master_index) if master_index is not None else None
